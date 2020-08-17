@@ -1,8 +1,7 @@
 import socket
 import select
 
-raspi_ip = '192.168.178.47'
-# raspi_ip = '169.254.233.213'
+raspi_ip = '169.254.233.213'
 username = 'root'
 password = 'TPM'
 port = 6666
