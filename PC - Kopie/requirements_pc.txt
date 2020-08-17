@@ -1,0 +1,5 @@
+###### Requirements without Version Specifiers ######`
+
+
+###### Requirements with Version Specifiers ######`
+paramiko >= 2.7.1            # paramiko for ssh, minimum version 2.7.1

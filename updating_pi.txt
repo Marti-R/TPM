@@ -1,0 +1,15 @@
+cd D:\Folder with Backup\Users\marti\PycharmProjects\TPM
+D:
+
+To command-line in this folder (password TPM):
+scp -r "Raspberry Pi/*" root@192.168.178.84:/home/pi/Desktop/TPM/
+
+### really no point to this. too many undocumented dependencies###
+To ssh:
+ssh root@192.168.178.84
+
+### really no point to this. too many undocumented dependencies###
+pip3 install -U -r /home/pi/Desktop/TPM/requirements_raspi.txt -f /home/pi/Desktop/TPM/required_packages/
+
+easier:
+pip3 install -U -r /home/pi/Desktop/TPM/requirements_raspi.txt
