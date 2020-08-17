@@ -243,6 +243,8 @@ def experiment_loop(instruction_pipe, settings):
     screen_surface = pygame.display.set_mode((experiment_screen.width, experiment_screen.height),
                                              pygame.FULLSCREEN | pygame.HWSURFACE | pygame.DOUBLEBUF)
 
+    pygame.mouse.set_visible(False)
+
     scaled_surface = pygame.Surface((int(display_info.current_w * scale), int(display_info.current_h * scale)))
     scaled_surface_size = scaled_surface.get_size()
 
