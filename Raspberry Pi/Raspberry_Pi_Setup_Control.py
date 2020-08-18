@@ -6,6 +6,7 @@ import random as rdm
 import os
 import sys
 from threading import Timer
+import random as rnd
 
 # externals
 import pygame
@@ -555,6 +556,8 @@ def mouse_pairing_loop(instruction_pipe, settings):
     pygame.init()
     clock = pygame.time.Clock()
 
+    target_fps = settings['target_fps']
+
     background_color = (0, 0, 0)  # Background-color (black)
 
     ahead_buffer = 2  # Buffered objects in front of the mouse
@@ -564,6 +567,10 @@ def mouse_pairing_loop(instruction_pipe, settings):
     # Load settings
     speed_multiplier = settings["speed_multiplier"]
     acceleration_cutoff = settings["acceleration_cutoff"]
+    reward_abort = settings["reward_abort"]
+
+    tube_out = settings["tube_pwm_pin"]
+    disk_out = settings["disk_pwm_pin"]
 
     pairing_pin = settings['pairing_pin']
     pairing_reward_duration = settings['pairing_reward_duration']
@@ -611,6 +618,9 @@ def mouse_pairing_loop(instruction_pipe, settings):
     # Prepare the PWM-pin to be written on
     import pigpio
     pi = pigpio.pi()
+    pi.hardware_PWM(tube_out, 500, 100000)
+    pi.hardware_PWM(disk_out, 500, 100000)
+    print("PiGPIO PWM initialized.")
 
     # Prepare the i2c communication
     import board
@@ -641,6 +651,7 @@ def mouse_pairing_loop(instruction_pipe, settings):
 
     shift_remaining = 0.0
 
+    start_time = time.perf_counter()
     contact_time = time.perf_counter()
     tube_contact = False
     print('init')
@@ -680,26 +691,52 @@ def mouse_pairing_loop(instruction_pipe, settings):
         delta_position_real = delta_position_volt / 5.033 * wheel_circumference
 
         if not tube_contact:
-            tube_position += speed_multiplier * delta_position_real
+            if not time.perf_counter() < start_time + pairing_reward_duration:
+                tube_position += speed_multiplier * delta_position_real
 
-            if tube_position < 0:
+                if tube_position < 0:
+                    tube_position = 0
+
+                elif tube_position > 0.95 * tube_distance:
+                    tube_position = tube_distance
+                    tube_contact = True
+                    contact_time = time.perf_counter()
+
+                    pi.write(pairing_pin, 1)
+                    pin_low_thread = Timer(pairing_reward_duration, pi.write, kwargs={
+                        'gpio': pairing_pin,
+                        'level': 0
+                    })
+                    pin_low_thread.daemon = True
+                    pin_low_thread.start()
+
+                pi.hardware_PWM(tube_out, 500, int(tube_position / tube_distance * 500000) + 100000)
+
+        else:
+            if tube_position < reward_abort * tube_distance or \
+                    time.perf_counter() > contact_time + pairing_reward_duration:
                 tube_position = 0
+                tube_contact = False
 
-            elif tube_position > 0.95 * tube_distance:
-                tube_position = tube_distance
-                tube_contact = True
-                contact_time = time.perf_counter()
+                disk_state = rnd.randint(0, 4)
 
-                pi.write(pairing_pin, 1)
-                pin_low_thread = Timer(pairing_reward_duration, pi.write, kwargs={
-                    'gpio': pairing_pin,
-                    'level': 0
+                # Writing the disk-movement
+                pin_low_thread = Timer(pairing_reward_duration, pi.hardware_PWM, kwargs={
+                    'gpio': disk_out,
+                    'PWMfreq': 500,
+                    'PWMduty': int(disk_state * 0.25 * 500000) + 100000
                 })
                 pin_low_thread.daemon = True
                 pin_low_thread.start()
 
-        elif time.perf_counter() > contact_time + pairing_reward_duration:
-            tube_contact = False
+                start_time = time.perf_counter()
+
+                continue
+
+            elif tube_position > tube_distance:
+                tube_position = tube_distance
+
+            pi.hardware_PWM(tube_out, 500, int(500000) + 100000)
 
         absolute_position += delta_position_real
 
