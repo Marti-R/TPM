@@ -678,6 +678,7 @@ def mouse_pairing_loop(instruction_pipe, settings):
         if not tube_contact:
             if not time.perf_counter() < start_time + pairing_reward_duration:
                 tube_position += speed_multiplier * delta_position_real
+                print(tube_position)
 
                 if tube_position < 0:
                     tube_position = 0
