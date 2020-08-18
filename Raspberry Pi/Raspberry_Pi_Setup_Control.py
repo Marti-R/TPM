@@ -233,15 +233,7 @@ def experiment_loop(instruction_pipe, settings):
     display_info = pygame.display.Info()
     p_cm_ratio = display_info.current_w / screen_width_cm
 
-    import screeninfo
-    screens = screeninfo.get_monitors()
-    experiment_screen = None
-    for screen in screens:
-        if screen.x == 0:
-            experiment_screen = screen
-
-
-    screen_surface = pygame.display.set_mode((experiment_screen.width, experiment_screen.height),
+    screen_surface = pygame.display.set_mode((display_info.current_w, display_info.current_h),
                                              pygame.FULLSCREEN | pygame.HWSURFACE | pygame.DOUBLEBUF)
 
     pygame.mouse.set_visible(False)
