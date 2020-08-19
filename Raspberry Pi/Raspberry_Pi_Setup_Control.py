@@ -538,7 +538,7 @@ def experiment_loop(instruction_pipe, settings):
     print('im closed')
 
 
-def mouse_pairing_loop(instruction_pipe, settings):
+def mouse_pairing_loop_backup(instruction_pipe, settings):
     try:
         os.nice(-20)
     except AttributeError:
@@ -566,6 +566,7 @@ def mouse_pairing_loop(instruction_pipe, settings):
 
     pairing_pin = settings['pairing_pin']
     pairing_reward_duration = settings['pairing_reward_duration']
+    pairing_tube_delay = settings['pairing_tube_delay']
     pairing_wait_duration = settings['pairing_wait_duration']
 
     if settings["main_screen_direction_left"]:
@@ -676,8 +677,10 @@ def mouse_pairing_loop(instruction_pipe, settings):
 
         delta_position_real = delta_position_volt / 5.033 * wheel_circumference
 
+
+
         if not tube_contact:
-            if not time.perf_counter() < start_time + pairing_wait_duration:
+            if time.perf_counter() > start_time + pairing_tube_delay:
                 tube_position += speed_multiplier * delta_position_real
 
                 if tube_position < 0:
@@ -686,15 +689,21 @@ def mouse_pairing_loop(instruction_pipe, settings):
                 elif tube_position > 0.95 * tube_distance:
                     tube_position = tube_distance
                     tube_contact = True
-                    contact_time = time.perf_counter()
+                    contact_time = time.perf_counter() + pairing_tube_delay
 
-                    # pi.write(pairing_pin, 1)
-                    # pin_low_thread = Timer(pairing_reward_duration, pi.write, kwargs={
-                    #     'gpio': pairing_pin,
-                    #     'level': 0
-                    # })
-                    # pin_low_thread.daemon = True
-                    # pin_low_thread.start()
+                    pin_low_thread = Timer(pairing_tube_delay, pi.write, kwargs={
+                        'gpio': pairing_pin,
+                        'level': 1
+                    })
+                    pin_low_thread.daemon = True
+                    pin_low_thread.start()
+
+                    pin_low_thread = Timer(pairing_tube_delay + pairing_reward_duration, pi.write, kwargs={
+                        'gpio': pairing_pin,
+                        'level': 0
+                    })
+                    pin_low_thread.daemon = True
+                    pin_low_thread.start()
 
                 pi.hardware_PWM(tube_out, 500, int(tube_position / tube_distance * 500000) + 100000)
 
@@ -702,14 +711,241 @@ def mouse_pairing_loop(instruction_pipe, settings):
             tube_position += speed_multiplier * delta_position_real
 
             if tube_position < reward_abort * tube_distance or \
-                    time.perf_counter() > contact_time + pairing_wait_duration - 0.5:
+                    time.perf_counter() > contact_time + pairing_wait_duration:
                 tube_position = 0
                 tube_contact = False
 
                 disk_state = rnd.randint(0, 4)
 
                 # Writing the disk-movement
-                pin_low_thread = Timer(0.5, pi.hardware_PWM, kwargs={
+                pin_low_thread = Timer(pairing_tube_delay, pi.hardware_PWM, kwargs={
+                    'gpio': disk_out,
+                    'PWMfreq': 500,
+                    'PWMduty': int(disk_state * 0.25 * 500000) + 100000
+                })
+                pin_low_thread.daemon = True
+                pin_low_thread.start()
+
+                pi.hardware_PWM(tube_out, 500, int(tube_position / tube_distance * 500000) + 100000)
+
+                start_time = time.perf_counter()
+
+                continue
+
+            elif tube_position > tube_distance:
+                tube_position = tube_distance
+
+            pi.hardware_PWM(tube_out, 500, int(500000) + 100000)
+
+        absolute_position += delta_position_real
+
+        # Moving the markers
+        shift = screen_direction * speed_multiplier * p_cm_ratio * scale * delta_position_real + shift_remaining
+        shift_remaining = shift - int(shift)
+        update_rectangle_list.extend(marker_layer.move_and_blit(int(shift)))
+
+        pygame.transform.scale(scaled_surface, (display_info.current_w, display_info.current_h),
+                               screen_surface)
+
+        update_rectangle_list = scale_rectangles(update_rectangle_list, 1. / scale)
+        pygame.display.update(update_rectangle_list)
+
+        clock.tick(target_fps)
+
+    pygame.display.quit()
+    pygame.quit()
+    print('im closed')
+
+
+def mouse_pairing_loop(instruction_pipe, settings):
+    try:
+        os.nice(-20)
+    except AttributeError:
+        # not available on Windows
+        pass
+
+    pygame.init()
+    clock = pygame.time.Clock()
+
+    target_fps = settings['target_fps']
+
+    background_color = (0, 0, 0)  # Background-color (black)
+
+    ahead_buffer = 2  # Buffered objects in front of the mouse
+    onscreen_objects = 4  # Objects currently on-screen
+    behind_buffer = 2  # Buffered objects behind the mouse
+
+    # Load settings
+    speed_multiplier = settings["speed_multiplier"]
+    acceleration_cutoff = settings["acceleration_cutoff"]
+    reward_abort = settings["reward_abort"]
+
+    tube_out = settings["tube_pwm_pin"]
+    disk_out = settings["disk_pwm_pin"]
+
+    pairing_pin = settings['pairing_pin']
+    pairing_reward_duration = settings['pairing_reward_duration']
+    pairing_tube_delay = settings['pairing_tube_delay']
+    pairing_wait_duration = settings['pairing_wait_duration']
+
+    tube_speed = settings['tube_speed']
+
+    if settings["main_screen_direction_left"]:
+        screen_direction = -1
+    else:
+        screen_direction = 1
+
+    scale = settings['scale']
+
+    marker_height_cm = settings["marker_height_cm"]
+    screen_width_cm = settings["screen_width_cm"]
+
+    wheel_diameter = settings["wheel_diameter_cm"]
+    tube_distance = settings["tube_distance_cm"]
+    wheel_circumference = math.pi * wheel_diameter
+
+    marker_locations = [f'./markers/{file}' for file in os.listdir('./markers') if
+                        file.endswith('.gif')]
+
+    # Create pygame screen and objects
+    os.environ['SDL_VIDEO_CENTERED'] = '1'
+
+    display_info = pygame.display.Info()
+    p_cm_ratio = display_info.current_w / screen_width_cm
+
+    screen_surface = pygame.display.set_mode((display_info.current_w, display_info.current_h),
+                                             pygame.FULLSCREEN | pygame.HWSURFACE | pygame.DOUBLEBUF)
+
+    scaled_surface = pygame.Surface((int(display_info.current_w * scale), int(display_info.current_h * scale)))
+
+    # Create Screen objects
+    marker_height = marker_height_cm * p_cm_ratio
+    marker_layer = MarkerLayer(scaled_surface, (ahead_buffer, onscreen_objects, behind_buffer),
+                               int(marker_height * scale), marker_locations)
+
+    # Prepare the PWM-pin to be written on
+    import pigpio
+    pi = pigpio.pi()
+    pi.hardware_PWM(tube_out, 500, 100000)
+    pi.hardware_PWM(disk_out, 500, 100000)
+    print("PiGPIO PWM initialized.")
+
+    # Prepare the i2c communication
+    import board
+    import busio
+    i2c = busio.I2C(board.SCL, board.SDA)
+    print("I2C initialized.")
+
+    # Prepare the ADC-object
+    import adafruit_ads1x15.ads1115 as ADS
+    from adafruit_ads1x15.analog_in import AnalogIn
+    ads = ADS.ADS1115(i2c)
+    ads.gain = 2 / 3
+    print("ADC initialized.")
+
+    # Prepare position channel to be read
+    position_channel = AnalogIn(ads, ADS.P0)
+    print("Channels initialized.")
+
+    # Prepare the frame output trigger pin
+    pi.set_mode(pairing_pin, pigpio.OUTPUT)
+
+    position_volt = position_channel.voltage
+
+    absolute_position = 0
+    tube_position = 0
+    old_position_volt = position_volt
+    old_delta_position_volt = 0
+
+    shift_remaining = 0.0
+
+    start_time = time.perf_counter()
+    contact_time = time.perf_counter()
+    tube_contact = False
+    print('init')
+
+    previous_loop = time.perf_counter()
+
+    instruction_pipe.send((Instructions.Ready,))
+
+    # Trial-phase loop
+    while True:
+        # Check for new instructions
+        if instruction_pipe.poll():
+            message = instruction_pipe.recv()
+            command = message[0]
+            arguments = message[1:]
+            if command is Instructions.Stop_Experiment:
+                break
+            else:
+                raise ValueError(f'Unknown command received: {command}')
+
+        # Event handling
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                sys.exit()
+
+        update_rectangle_list = []
+
+        scaled_surface.fill(background_color)
+
+        position_volt = position_channel.voltage
+
+        delta_position_volt = position_volt - old_position_volt
+        old_position_volt = position_volt
+        delta2_position_volt = delta_position_volt - old_delta_position_volt
+
+        if abs(delta2_position_volt) > acceleration_cutoff:
+            continue
+
+        delta_position_real = delta_position_volt / 5.033 * wheel_circumference
+
+        if not tube_contact:
+            if time.perf_counter() > start_time + pairing_tube_delay:
+                this_loop = time.perf_counter()
+                tube_position += speed_multiplier * math.copysign(1, delta_position_real) * min(
+                    abs(delta_position_real) / (this_loop - previous_loop), tube_speed) * (this_loop - previous_loop)
+                previous_loop = this_loop
+
+                if tube_position < 0:
+                    tube_position = 0
+
+                elif tube_position > 0.95 * tube_distance:
+                    tube_position = tube_distance
+                    tube_contact = True
+                    contact_time = time.perf_counter() + pairing_tube_delay
+
+                    pin_low_thread = Timer(pairing_tube_delay, pi.write, kwargs={
+                        'gpio': pairing_pin,
+                        'level': 1
+                    })
+                    pin_low_thread.daemon = True
+                    pin_low_thread.start()
+
+                    pin_low_thread = Timer(pairing_tube_delay + pairing_reward_duration, pi.write, kwargs={
+                        'gpio': pairing_pin,
+                        'level': 0
+                    })
+                    pin_low_thread.daemon = True
+                    pin_low_thread.start()
+
+                pi.hardware_PWM(tube_out, 500, int(tube_position / tube_distance * 500000) + 100000)
+
+        else:
+            this_loop = time.perf_counter()
+            tube_position += speed_multiplier * math.copysign(1, delta_position_real) * min(
+                abs(delta_position_real) / (this_loop - previous_loop), tube_speed) * (this_loop - previous_loop)
+            previous_loop = this_loop
+
+            if tube_position < reward_abort * tube_distance or \
+                    time.perf_counter() > contact_time + pairing_wait_duration:
+                tube_position = 0
+                tube_contact = False
+
+                disk_state = rnd.randint(0, 4)
+
+                # Writing the disk-movement
+                pin_low_thread = Timer(pairing_tube_delay, pi.hardware_PWM, kwargs={
                     'gpio': disk_out,
                     'PWMfreq': 500,
                     'PWMduty': int(disk_state * 0.25 * 500000) + 100000

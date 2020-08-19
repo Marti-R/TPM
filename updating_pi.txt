@@ -15,7 +15,10 @@ easier:
 pip3 install -U -r /home/pi/Desktop/TPM/requirements_raspi.txt
 
 to make autostart:
+edit run_on_boot.sh only with notepad++ in unix mode
+
 @lxterminal --command "/home/pi/Desktop/run_on_boot.sh"
 in nano /etc/xdg/lxsession/LXDE-pi/autostart
 
 move the run_on_boot.sh to the /Desktop from /Desktop/TPM
+chmod +x run_on_boot.sh
