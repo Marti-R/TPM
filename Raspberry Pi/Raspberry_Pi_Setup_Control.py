@@ -688,32 +688,36 @@ def mouse_pairing_loop(instruction_pipe, settings):
                     tube_contact = True
                     contact_time = time.perf_counter()
 
-                    pi.write(pairing_pin, 1)
-                    pin_low_thread = Timer(pairing_reward_duration, pi.write, kwargs={
-                        'gpio': pairing_pin,
-                        'level': 0
-                    })
-                    pin_low_thread.daemon = True
-                    pin_low_thread.start()
+                    # pi.write(pairing_pin, 1)
+                    # pin_low_thread = Timer(pairing_reward_duration, pi.write, kwargs={
+                    #     'gpio': pairing_pin,
+                    #     'level': 0
+                    # })
+                    # pin_low_thread.daemon = True
+                    # pin_low_thread.start()
 
                 pi.hardware_PWM(tube_out, 500, int(tube_position / tube_distance * 500000) + 100000)
 
         else:
+            tube_position += speed_multiplier * delta_position_real
+
             if tube_position < reward_abort * tube_distance or \
-                    time.perf_counter() > contact_time + pairing_wait_duration:
+                    time.perf_counter() > contact_time + pairing_wait_duration - 0.5:
                 tube_position = 0
                 tube_contact = False
 
                 disk_state = rnd.randint(0, 4)
 
                 # Writing the disk-movement
-                pin_low_thread = Timer(pairing_wait_duration, pi.hardware_PWM, kwargs={
+                pin_low_thread = Timer(0.5, pi.hardware_PWM, kwargs={
                     'gpio': disk_out,
                     'PWMfreq': 500,
                     'PWMduty': int(disk_state * 0.25 * 500000) + 100000
                 })
                 pin_low_thread.daemon = True
                 pin_low_thread.start()
+
+                pi.hardware_PWM(tube_out, 500, int(tube_position / tube_distance * 500000) + 100000)
 
                 start_time = time.perf_counter()
 
