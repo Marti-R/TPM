@@ -2,7 +2,6 @@ import time
 
 from pybpodapi.protocol import Bpod, StateMachine
 
-
 def build_state_machine(pod, **kwargs):
     """
     builds state machine from experimental variables passed as kwargs
