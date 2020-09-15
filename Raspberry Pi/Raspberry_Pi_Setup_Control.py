@@ -816,6 +816,8 @@ def mouse_pairing_loop(instruction_pipe, settings):
     screen_surface = pygame.display.set_mode((display_info.current_w, display_info.current_h),
                                              pygame.FULLSCREEN | pygame.HWSURFACE | pygame.DOUBLEBUF)
 
+    pygame.mouse.set_visible(False)
+
     scaled_surface = pygame.Surface((int(display_info.current_w * scale), int(display_info.current_h * scale)))
 
     # Create Screen objects
@@ -901,7 +903,8 @@ def mouse_pairing_loop(instruction_pipe, settings):
         delta_position_real = delta_position_volt / 5.033 * wheel_circumference
 
         if not tube_contact:
-            if time.perf_counter() > start_time + pairing_tube_delay:
+            if time.perf_counter() > start_time + pairing_tube_delay *\
+                    5:
                 this_loop = time.perf_counter()
                 tube_position += speed_multiplier * math.copysign(1, delta_position_real) * min(
                     abs(delta_position_real) / (this_loop - previous_loop), tube_speed) * (this_loop - previous_loop)
@@ -942,7 +945,8 @@ def mouse_pairing_loop(instruction_pipe, settings):
                 tube_position = 0
                 tube_contact = False
 
-                disk_state = rnd.randint(0, 4)
+                disk_state = 0
+                # disk_state = rnd.randint(0, 4)
 
                 # Writing the disk-movement
                 pin_low_thread = Timer(pairing_tube_delay, pi.hardware_PWM, kwargs={

@@ -1,4 +1,4 @@
-import socket
+import socketpairing
 import select
 import threading
 from queue import Queue
