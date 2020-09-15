@@ -7,6 +7,14 @@ import time
 import os
 from subprocess import call
 
+# Echo module
+import serial
+import struct
+firmwareVersion = 1
+moduleName = "EchoModule"
+ser = serial.Serial("/dev/ttyS0", 1312500)
+
+
 # project modules
 from Raspberry_Pi_Utility import Instructions
 import Raspberry_Pi_Setup_Control
@@ -181,7 +189,7 @@ if __name__ == '__main__':
 
         # Receive data from client and decide which function to call
         while True:
-            # external communications
+            # PC communications
             try:    # check if select fails
                 ready_to_read, ready_to_write, in_error = select.select([conn], [conn], [], 1)
                 if len(ready_to_read) > 0:
@@ -204,6 +212,23 @@ if __name__ == '__main__':
                 conn.close()
                 print(f'Socket Error: {error}')
                 break
+
+            # BPod communications
+            bytesAvailable = ser.in_waiting;
+            if bytesAvailable > 0:
+                inByte = ser.read()
+                unpackedByte = struct.unpack('B', inByte)
+                if unpackedByte[0] != 255:
+                    ser.write(inByte)
+                else:
+                    # This code returns a self-description to the state machine.
+                    Msg = struct.pack('B', 65)  # Acknowledgement
+                    Msg += struct.pack('I', firmwareVersion)  # Firmware version as 32-bit unsigned int
+                    Msg += struct.pack('B', 10)  # Length of module name
+                    Msg += struct.pack(str(len(moduleName)) + 's', moduleName.encode('utf-8'))  # Module name
+                    Msg += struct.pack('B', 0)  # 0 to indicate no more self description to follow
+                    ser.write(Msg)
+                ser.flush()
 
             # internal communications
             if screen_pipe.poll():
