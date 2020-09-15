@@ -134,7 +134,7 @@ class SoftcodeHandler:
         """
 
         if data == self.experimental_variables["end_softcode"]:
-            #code to handle end of trial; is called when the raspberry pi aborts the trial
+            #code to handle end of trial;
             pass
         elif data == self.experimental_variables["reward_softcode"]:
             #code to handle reward ("reward marker"); is called when the mouse licked

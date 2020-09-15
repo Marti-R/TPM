@@ -242,6 +242,14 @@ class MyTrialSettings():
     def __init__(self):
         self.setting_groups = []
 
+    def lock(self):
+        for g in self.setting_groups:
+            g.lock()
+
+    def unlock(self):
+        for g in self.setting_groups:
+            g.unlock()
+
     def export_settings(self):
 
         result = {}
@@ -338,6 +346,14 @@ class MySettingGroup():
         self.label = group_settings["label"] if "label" in group_settings else name
         self.settings = []
         self.group_settings = group_settings
+
+    def lock(self):
+        for s in self.settings:
+            s.lock()
+
+    def unlock(self):
+        for s in self.settings:
+            s.unlock()
 
     def get_experiment_variables(self):
 
@@ -728,6 +744,15 @@ class MySetting():
         else:
             self.hide = False
 
+    def lock(self):
+
+        self.entry_widget.lock()
+
+    def unlock(self):
+
+        self.entry_widget.unlock()
+
+
     def is_constant(self):
 
         entry_type = self.get_entry_type()
@@ -881,6 +906,14 @@ class MyCompoundWidget:
     standard_width = 15
     standard_width_small = 3
 
+    def lock(self):
+        self.v["state"] = "disabled"
+
+    def unlock(self):
+        self.v["state"] = "normal"
+
+
+
     def is_empty(self):
         return False
 
@@ -915,6 +948,13 @@ class ConstantEntry(MyCompoundWidget):
             self.make_bool_entry(frame)
         else:
             self.make_string_entry(frame)
+
+    def lock(self):
+
+        self.v["state"] = "disabled"
+
+    def unlock(self):
+        self.v["state"] = "normal"
 
     def user_enter(self, event):
 
