@@ -1,0 +1,13 @@
+Metadata-Version: 2.1
+Name: logging-bootstrap
+Version: 1.0.0
+Summary: Library to provide simple methods to bootstrap logger with default settings.
+Home-page: https://bitbucket.org/fchampalimaud/logging-bootstrap
+Author: Carlos Mão de Ferro
+Author-email: cajomferro@gmail.com
+License: Copyright (C) 2007 Free Software Foundation, Inc. <http://fsf.org/>
+Platform: UNKNOWN
+
+UNKNOWN
+
+
