@@ -152,9 +152,18 @@ experimental_variables = {
 
 }
 
-pod = Bpod()
+import logging
+logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+from pybpodapi.bpod_modules.bpod_modules import BpodModules
 
-pod.open()
+logger.debug('Calling constructor')
+pod = Bpod('COM5')
+logger.debug('Called constructor')
+#pod.open()
+print('Modules:', pod.modules)
+for module in pod.modules:
+    print(f'Module.name: {module.name}  - {module.serial_port}')
 
 sma = build_state_machine(pod, **experimental_variables)
 pod.softcode_handler_function = softcode_handler

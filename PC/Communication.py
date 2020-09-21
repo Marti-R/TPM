@@ -1,17 +1,12 @@
-import socketpairing
+import socket
 import select
 import threading
 from queue import Queue
 
 connection_settings = {
-    'raspi_ip': '192.168.178.47',
-#    'raspi_ip': '169.254.233.213',
+#    'raspi_ip': '192.168.178.47',
+    'raspi_ip': '169.254.233.213',
     'port': 6666,
-}
-
-raspi_flags = {
-    'connected': False,
-    'screen_active': False,
 }
 
 
@@ -43,61 +38,8 @@ def create_connection(ip, port):
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     client_socket.connect((ip, port))
-    raspi_flags['connected'] = True
     client_socket.setblocking(False)
     return client_socket
-
-
-# to start screen
-def start_screen(connection):
-    connection.send('1'.encode())
-
-
-# to close screen
-def close_screen(connection):
-    connection.send('4'.encode())
-
-
-# to get a setting
-def get_option(connection, key=None):
-    if key:  # works with a specific key
-        connection.send(f'get_option {key}'.encode())
-    else:   # or none, the raspi then sends the full settings dict
-        connection.send(f'get_option'.encode())
-
-
-# to set a setting
-def set_option(connection, key_value_pair):
-    # for now the communication is string-based, later will be using pickle
-    # this means that boolean keys have to be encoded into True=anything and False=''
-    # since any string which is not empty will be cast as boolean True
-    connection.send(f'set_option {key_value_pair[0]} {key_value_pair[1]}'.encode())
-
-
-# to start a trial
-def start_trial(connection):
-    connection.send('2'.encode)
-
-
-# to end a trial
-def end_trial(connection):
-    connection.send('3'.encode)
-
-
-# to set the disk state
-def set_disk(connection, state):
-    # states are between 0 and 3
-    connection.send(f'set_disk {state}'.encode)
-
-
-# to quit the program on the raspberry pi, should'nt use this
-def end(connection):
-    connection.send('end'.encode)
-
-
-# to quit the program on the raspberry pi, and shut it down
-def shutdown(connection, state):
-    connection.send('shutdown'.encode)
 
 
 if __name__ == '__main__':

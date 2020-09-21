@@ -1,14 +1,23 @@
-from pybpodapi.bpod_modules.bpod_module import BpodModule
+import serial
+import struct
 
-AnalogIn = BpodModule(connected=True, module_name='Analog Input Module', firmware_version=0, serial_port='COM3')
+ser = serial.Serial(
+    port='COM6',
+)
+#      case 'O': // USB initiated new connection; reset all state variables
+#      case 'S': // Start/Stop data streaming
+#      case 'E': // Start/Stop threshold event detection + transmission
+#      case 'L': // Start/Stop logging data from active channels to microSD card
+#      case 'C': // Set subset of channels to stream raw data (USB and module)
+#      case 'R': // Select ADC Voltage range for each channel
+#      case 'A': // Set max number of actively sampled channels
+#      case 'D': // Read SD card and send data to USB
+#      case 'F': // Change sampling frequency
 
-# 'D' read SD card and send data to USB
-# 'A2' set max number of actively sampled channels to 2
-# 'L0/1' stop or start logging to SD card
+print(ser.isOpen())
+thestring = "O"
+ser.write(thestring.encode())
+s = ser.read()
+print(s)
+ser.close()
 
-AnalogIn.load_message('A2')
-
-# PyAudio for microphone
-# pypylon for cameras
-
-print(AnalogIn)
