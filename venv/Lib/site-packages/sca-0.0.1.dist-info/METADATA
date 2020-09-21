@@ -1,0 +1,22 @@
+Metadata-Version: 2.1
+Name: sca
+Version: 0.0.1
+Summary: Side Channel Analysis
+Home-page: UNKNOWN
+Author: Donggeun Kwon
+Author-email: donggeun.kwon@gmail.com
+License: UNKNOWN
+Keywords: Side Channel Analysis
+Platform: UNKNOWN
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.2
+Classifier: Programming Language :: Python :: 3.3
+Classifier: Programming Language :: Python :: 3.4
+Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Requires-Python: >=3
+
+UNKNOWN
+
+
