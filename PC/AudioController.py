@@ -2,10 +2,9 @@ import pyaudio
 import wave
 import time
 import numpy as np
-
-RATE = 384000
-CHUNK = int(4996)
-
+from multiprocessing import Process, Manager
+from ctypes import c_wchar_p
+import json
 
 class AudioHandler(object):
     def __init__(self):
@@ -79,11 +78,106 @@ class AudioHandler(object):
     def start(self):
         self.active = True
 
+
+class AudioHandlerProcess(Process):
+    def __init__(self, alive_flag, recording_flag, saving_list, saving_location, device_id, process_id):
+        super().__init__()
+        self.alive_flag = alive_flag
+        self.recording_flag = recording_flag
+        self.saving_list = saving_list
+        self.saving_location = saving_location
+        self.device_id = device_id
+        self.process_id = process_id
+
+        self.pa = None
+        self.stream = None
+
+        self.buffer = []
+        self.current_chunk = None
+        self.meta = {}
+        self.alive_time = 0
+
+    def run(self):
+        self.pa = pyaudio.PyAudio()
+        self.stream = self.pa.open(format=pyaudio.paInt32,
+                                   channels=1,
+                                   rate=384000,
+                                   input=True,
+                                   input_device_index=self.device_id,
+                                   frames_per_buffer=4096)
+
+        print('Device %{}: %{}'.format(self.device_id, self.pa.get_device_info_by_index(self.device_id)['name']))
+
+        self.alive_flag.wait()
+        self.alive_time = time.perf_counter()
+        self.meta['start'] = time.time()
+
+        while self.alive_flag.is_set():
+            self.current_chunk = self.stream.read(4096, exception_on_overflow=False)
+
+            if self.recording_flag.is_set:
+                self.buffer.append(self.current_chunk)
+
+            if self.saving_list[self.process_id]:
+                self.meta['stop'] = time.time()
+                with wave.open(rf'{self.saving_location.value}\mic{self.device_id}.wav', 'wb') as wavefile:
+                    wavefile.setnchannels(1)
+                    wavefile.setsampwidth(self.pa.get_sample_size(pyaudio.paInt32))
+                    wavefile.setframerate(384000)
+                    wavefile.writeframes(b''.join(self.buffer))
+                with open(rf'{self.saving_location.value}\mic{self.device_id}_meta.json', 'w') as outfile:
+                    json.dump(self.meta, outfile)
+                # print(len(self.buffer))
+                self.buffer = []
+                self.meta = {}
+                self.saving_list[self.process_id] = 0
+
+        self.stream.stop_stream()
+        self.stream.close()
+        self.pa.terminate()
+
+
 if __name__ == '__main__':
-    audio = AudioHandler()
-    audio.start()
-    time.sleep(6)
-    audio.stop()
-    audio.save('test.wav')
-    audio.close()
+    pa = pyaudio.PyAudio()
+    devices = []
+    handler_processes = []
+
+    valid_mics = ['Microphone (UltraMic384K 16bit ']
+    print(pa.get_device_count())
+    for i in range(pa.get_device_count()):
+        devinfo = pa.get_device_info_by_index(i)
+        print('Device %{}: %{}'.format(i, devinfo['name']))
+        for name in valid_mics:
+            if name == devinfo['name']:
+                devices.append(i)
+
+    print(devices)
+
+    manager = Manager()
+    all_alive = manager.Event()
+    all_recording = manager.Event()
+    mic_list = manager.list([0] * len(devices))
+    saving_location = manager.Value(c_wchar_p, r'trial0\\')
+
+    for process_id, device_id in enumerate(devices):
+        p = AudioHandlerProcess(all_alive, all_recording, mic_list, saving_location, device_id, process_id)
+        p.daemon = True
+        p.start()
+        handler_processes.append(p)
+
+    time.sleep(2)
+    all_alive.set()
+    all_recording.set()
+    time.sleep(5)
+    all_recording.clear()
+
+    mic_list[:] = [1] * len(mic_list)
+
+    all_alive.clear()
+
+    while sum(mic_list) != 0:
+        pass
+
+    for i, handler in enumerate(handler_processes):
+        handler.join()
 

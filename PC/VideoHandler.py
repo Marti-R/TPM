@@ -72,8 +72,9 @@ class VideoHandlerProcess(Process):
         self.framerate = None
 
         self.buffer = []
+        self.current_frame = None
         self.meta = {}
-        self.alive_time = 0
+        self.alive_timestamp = 0
 
     def run(self):
         self.TlFactory = pylon.TlFactory.GetInstance()
@@ -90,9 +91,9 @@ class VideoHandlerProcess(Process):
             if self.camera.IsGrabbing():
                 grabResult = self.camera.RetrieveResult(5000, pylon.TimeoutHandling_ThrowException)
                 if grabResult.GrabSucceeded():
-                    current_frame = grabResult.Array
+                    self.current_frame = grabResult.Array
                     if self.recording_flag.is_set:
-                        self.buffer.append(current_frame)
+                        self.buffer.append(self.current_frame)
                         self.meta[grabResult.ImageNumber] = {
                             'NumberOfSkippedImages': grabResult.NumberOfSkippedImages,
                             'TimeStamp': grabResult.TimeStamp,
@@ -124,11 +125,11 @@ if __name__ == '__main__':
     manager = Manager()
     all_alive = manager.Event()
     all_recording = manager.Event()
-    saving_list = manager.list([0] * len(devices))
+    camera_list = manager.list([0] * len(devices))
     saving_location = manager.Value(c_wchar_p, r'trial0\\')
 
     for i in range(len(devices)):
-        p = VideoHandlerProcess(all_alive, all_recording, saving_list, saving_location, i)
+        p = VideoHandlerProcess(all_alive, all_recording, camera_list, saving_location, i)
         p.daemon = True
         p.start()
         cam_processes.append(p)
@@ -139,11 +140,11 @@ if __name__ == '__main__':
     time.sleep(2)
     all_recording.clear()
 
-    saving_list[:] = [1] * len(saving_list)
+    camera_list[:] = [1] * len(camera_list)
 
     all_alive.clear()
 
-    while sum(saving_list) != 0:
+    while sum(camera_list) != 0:
         pass
 
     for i, cam_process in enumerate(cam_processes):
