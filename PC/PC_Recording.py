@@ -8,9 +8,11 @@ import wave
 import time
 import tkinter as tk
 from PIL import ImageTk, Image
+import numpy as np
+
 
 class VideoHandlerProcess(Process):
-    def __init__(self, process_id, alive_flag, recording_flag, saving_list, saving_location, device_id):
+    def __init__(self, process_id, alive_flag, recording_flag, saving_list, saving_location, current_output, device_id):
         super().__init__()
         self.process_id = process_id
         self.alive_flag = alive_flag
@@ -25,7 +27,7 @@ class VideoHandlerProcess(Process):
         self.framerate = None
 
         self.buffer = []
-        self.current_frame = None
+        self.current_output = current_output
         self.meta = {}
 
     def run(self):
@@ -45,9 +47,9 @@ class VideoHandlerProcess(Process):
             if self.camera.IsGrabbing():
                 grabResult = self.camera.RetrieveResult(5000, pylon.TimeoutHandling_ThrowException)
                 if grabResult.GrabSucceeded():
-                    self.current_frame = grabResult.Array
+                    self.current_output[self.process_id] = np.array(grabResult.GetArray())[::10, ::10]
                     if self.recording_flag.is_set:
-                        self.buffer.append(self.current_frame)
+                        self.buffer.append(grabResult.GetArray())
                         self.meta[grabResult.ImageNumber] = {
                             'NumberOfSkippedImages': grabResult.NumberOfSkippedImages,
                             'TimeStamp': grabResult.TimeStamp,
@@ -63,7 +65,7 @@ class VideoHandlerProcess(Process):
                         writer.append_data(image)
                 with open(rf'{self.saving_location.value}\cam{self.device_id}_meta.json', 'w') as outfile:
                     json.dump(self.meta, outfile)
-                # print(len(self.buffer))
+                print(len(self.buffer))
                 self.buffer = []
                 self.meta = {}
                 self.saving_list[self.process_id] = 0
@@ -73,7 +75,7 @@ class VideoHandlerProcess(Process):
 
 
 class AudioHandlerProcess(Process):
-    def __init__(self, process_id, alive_flag, recording_flag, saving_list, saving_location, device_id):
+    def __init__(self, process_id, alive_flag, recording_flag, saving_list, saving_location, current_output, device_id):
         super().__init__()
         self.process_id = process_id
         self.alive_flag = alive_flag
@@ -86,7 +88,7 @@ class AudioHandlerProcess(Process):
         self.stream = None
 
         self.buffer = []
-        self.current_chunk = None
+        self.current_output = current_output
         self.meta = {}
 
     def run(self):
@@ -105,10 +107,10 @@ class AudioHandlerProcess(Process):
         self.meta['start'] = time.time()
 
         while self.alive_flag.is_set():
-            self.current_chunk = self.stream.read(4096, exception_on_overflow=False)
+            self.current_output[self.process_id] = self.stream.read(4096, exception_on_overflow=False)
 
             if self.recording_flag.is_set:
-                self.buffer.append(self.current_chunk)
+                self.buffer.append(self.current_output[self.process_id])
 
             if self.saving_list[self.process_id]:
                 self.meta['save'] = time.time()
@@ -130,44 +132,92 @@ class AudioHandlerProcess(Process):
         self.pa.terminate()
 
 
-class TkHandler(Process):
-    def __init__(self):
-        super().__init__()
-        self.window = None
-
-    def run(self):
-        self.window = tk.Tk()
-
-        frame1 = tk.Frame(master=self.window, width=200, height=100, bg="red")
-        frame1.pack(fill=tk.Y, side=tk.LEFT)
-
-        frame2 = tk.Frame(master=self.window, width=100, bg="yellow")
-        frame2.pack(fill=tk.Y, side=tk.LEFT)
-
-        frame3 = tk.Frame(master=self.window, width=50, bg="blue")
-        frame3.pack(fill=tk.Y, side=tk.LEFT)
-
-        self.window.mainloop()
-
-
-class App:
-    def __init__(self, window, window_title):
+class Application:
+    def __init__(self, alive_flag, window, current_output, process_names):
+        self.alive_flag = alive_flag
         self.window = window
-        self.window.title(window_title)
+        self.window.resizable(0, 0)
+        self.current_output = current_output
+        self.process_names = process_names
 
-        self.canvas = tkinter.Canvas(window, width=600, height=600)
-        self.canvas.pack()
+        self.cams = [(process_id, name) for process_id, name in enumerate(self.process_names) if 'cam' in name]
+        self.cam_labels = []
+        self.mini_size = (190, 150)
+        self.selected_cam = None
+        self.selected_cam_frame = None
+        self.selected_cam_label = None
 
-        # After it is called once, the update method will be automatically called every delay milliseconds
-        self.delay = 20
+        self.last_frame = time.perf_counter()
+
+        self.create_widgets()
         self.update()
-
         self.window.mainloop()
+
+    def create_widgets(self):
+        colors = ['red', 'blue', 'yellow']
+        for process_id, cam in self.cams:
+            frame = tk.Frame(master=self.window, width=self.mini_size[0], height=self.mini_size[1])
+            frame.grid_propagate(False)
+            frame.grid(row=0, column=process_id)
+
+            label = tk.Label(master=frame, bg='black', borderwidth=2)
+            label.bind("<Button-1>", lambda e, x=process_id: self.select_window(x))
+            label.pack(fill=tk.BOTH)
+            self.cam_labels.append(label)
+
+            new_frame = tk.Frame(master=frame)
+            new_frame.place(x=2, y=2, anchor=tk.NW)
+            tk.Label(master=new_frame, text=cam, bg='black', fg='white', font=("Helvetica", 16)).pack()
+
+            self.selected_cam_frame = tk.Label(master=self.window, width=self.mini_size[0]*3,
+                                               height=self.mini_size[1]*3, bd=-2)
+            self.selected_cam_frame.grid(row=1, column=0, columnspan=3)
+            self.selected_cam_frame.grid_remove()
+
+            self.selected_cam_label = tk.Label(master=self.selected_cam_frame, bg='yellow', borderwidth=2)
+            self.selected_cam_label.pack(fill=tk.BOTH)
 
     def update(self):
-        # Get a frame from the video source
+        for process_id, cam in self.cams:
+            image = Image.fromarray(self.current_output[process_id])
+            image = ImageTk.PhotoImage(image.resize((self.mini_size[0], self.mini_size[1]), Image.ANTIALIAS))
+            self.cam_labels[process_id].config(image=image)
+            self.cam_labels[process_id].image = image
 
-        self.window.after(self.delay, self.update)
+        if self.selected_cam:
+            image = Image.fromarray(self.current_output[self.selected_cam])
+            image = ImageTk.PhotoImage(image.resize((self.mini_size[0]*3+8, self.mini_size[1]*3+8), Image.ANTIALIAS))
+            self.selected_cam_label.config(image=image)
+            self.selected_cam_label.image = image
+
+        if self.alive_flag.is_set():
+            this_frame = time.perf_counter()
+            print(f'FPS: {1 / (this_frame - self.last_frame)}')
+            self.last_frame = this_frame
+            self.window.after(30, self.update)
+        else:
+            self.window.quit()
+
+    def select_window(self, clicked_cam):
+        if self.selected_cam == clicked_cam:
+            self.cam_labels[clicked_cam].config(bg='black')
+            self.selected_cam = None
+            self.selected_cam_frame.grid_remove()
+        else:
+            self.selected_cam = clicked_cam
+            self.cam_labels[clicked_cam].config(bg='yellow')
+            self.selected_cam_frame.grid()
+
+
+class GUIHandler(Process):
+    def __init__(self, alive_flag, current_output, process_names):
+        super().__init__()
+        self.current_output = current_output
+        self.process_names = process_names
+        self.alive_flag = alive_flag
+
+    def run(self):
+        Application(self.alive_flag, tk.Tk(), self.current_output, self.process_names)
 
 
 if __name__ == '__main__':
@@ -183,37 +233,42 @@ if __name__ == '__main__':
             if name == devinfo['name']:
                 microphones.append(i)
 
-    handler_processes = []
+    processes = []
     manager = Manager()
     all_alive = manager.Event()
     all_recording = manager.Event()
     saving_list = manager.list([0] * (len(cameras) + len(microphones)))
     saving_location = manager.Value(c_wchar_p, r'trial0\\')
-
-    # Create a window and pass it to the Application object
-    App = TkHandler()
-    App.daemon = True
-    App.start()
+    current_output = manager.list([None] * (len(cameras) + len(microphones)))
 
     process_id = 0
-    for device in cameras:
-        p = VideoHandlerProcess(process_id, all_alive, all_recording, saving_list, saving_location, process_id)
+    process_names = []
+    for device_id, device in enumerate(cameras):
+        p = VideoHandlerProcess(process_id, all_alive, all_recording, saving_list, saving_location, current_output, device_id)
         p.daemon = True
         p.start()
-        handler_processes.append(p)
+        processes.append(p)
+        process_names.append(f'cam{device_id}')
         process_id += 1
 
-    for device in microphones:
-        p = AudioHandlerProcess(process_id, all_alive, all_recording, saving_list, saving_location, device)
+    for device_id in microphones:
+        p = AudioHandlerProcess(process_id, all_alive, all_recording, saving_list, saving_location, current_output, device_id)
         p.daemon = True
         p.start()
-        handler_processes.append(p)
+        processes.append(p)
+        process_names.append(f'mic{device_id}')
         process_id += 1
 
     time.sleep(2)
     all_alive.set()
+
+    GUIProcess = GUIHandler(all_alive, current_output, process_names)
+    GUIProcess.daemon = True
+    GUIProcess.start()
+    processes.append(GUIProcess)
+
     all_recording.set()
-    time.sleep(2)
+    time.sleep(10)
     all_recording.clear()
 
     saving_list[:] = [1] * len(saving_list)
@@ -223,6 +278,6 @@ if __name__ == '__main__':
     while sum(saving_list) != 0:
         pass
 
-    for i, handler in enumerate(handler_processes):
+    for i, handler in enumerate(processes):
         handler.join()
 

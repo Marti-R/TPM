@@ -41,6 +41,7 @@ class Application:
                                                  int(img.height * self.resize_factors[i][1])), Image.ANTIALIAS))
             self.cam_labels[i].config(image=img)
             self.cam_labels[i].image = img
+
         if self.alive_flag.is_set():
             this_frame = time.perf_counter()
             print(f'FPS: {1 / (this_frame - self.last_frame)}')
@@ -106,7 +107,7 @@ if __name__ == '__main__':
     GUIProcess.daemon = True
     GUIProcess.start()
 
-    time.sleep(5)
+    time.sleep(50)
     all_alive.clear()
 
     for i, process in enumerate(processes):
