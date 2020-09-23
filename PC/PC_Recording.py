@@ -9,6 +9,9 @@ import time
 import tkinter as tk
 from PIL import ImageTk, Image
 import numpy as np
+import socket
+import select
+
 
 
 class VideoHandlerProcess(Process):
@@ -220,6 +223,14 @@ class GUIHandler(Process):
         Application(self.alive_flag, tk.Tk(), self.current_output, self.process_names)
 
 
+def _create_connection(ip, port):
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    client_socket.connect((ip, port))
+    client_socket.setblocking(False)
+    return client_socket
+
+
 if __name__ == '__main__':
     tlFactory = pylon.TlFactory.GetInstance()
     cameras = tlFactory.EnumerateDevices()
@@ -238,7 +249,7 @@ if __name__ == '__main__':
     all_alive = manager.Event()
     all_recording = manager.Event()
     saving_list = manager.list([0] * (len(cameras) + len(microphones)))
-    saving_location = manager.Value(c_wchar_p, r'trial0\\')
+    saving_location = manager.Value(c_wchar_p, r'')
     current_output = manager.list([None] * (len(cameras) + len(microphones)))
 
     process_id = 0
@@ -259,17 +270,41 @@ if __name__ == '__main__':
         process_names.append(f'mic{device_id}')
         process_id += 1
 
-    time.sleep(2)
-    all_alive.set()
+    p = GUIHandler(all_alive, current_output, process_names)
+    p.daemon = True
+    p.start()
+    processes.append(p)
 
-    GUIProcess = GUIHandler(all_alive, current_output, process_names)
-    GUIProcess.daemon = True
-    GUIProcess.start()
-    processes.append(GUIProcess)
+    def saving():
+        saving_list[:] = [1] * len(saving_list)
 
-    all_recording.set()
-    time.sleep(10)
-    all_recording.clear()
+    def set_location(location):
+        saving_location.value = location
+
+    command_dict = {
+        1: all_recording.set,
+        2: all_recording.clear,
+        3: saving,
+        4: all_alive.clear,
+        'set_location': set_location,
+    }
+
+    client_socket = _create_connection('localhost', 30000)
+    while True:
+        # inbound communication
+        ready_to_read, _, _ = select.select([client_socket], [], [], 0.5)
+        if len(ready_to_read) > 0:
+            dataFromClient = client_socket.recv(256)
+            message = dataFromClient.decode().split(' ')
+            if len(message) > 1:
+                command_dict[message[0]](*message[1:])
+            else:
+                command_dict[message[0]]()
+
+        if not all_alive.is_set():
+            for process in processes:
+                process.join()
+            break
 
     saving_list[:] = [1] * len(saving_list)
 
@@ -278,6 +313,6 @@ if __name__ == '__main__':
     while sum(saving_list) != 0:
         pass
 
-    for i, handler in enumerate(processes):
-        handler.join()
+    for process in processes:
+        process.join()
 
