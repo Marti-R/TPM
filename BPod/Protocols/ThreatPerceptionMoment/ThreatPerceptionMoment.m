@@ -1,5 +1,7 @@
 function ThreatPerceptionMoment
 global BpodSystem
+global PCSocket
+global CurrentTrial
 
 %% Setup (runs once before the first trial and stops the code until user continues)
 MaxTrials = 1000; % Set to some sane value, for preallocation
@@ -12,7 +14,7 @@ if isempty(fieldnames(S))  % If settings file was an empty struct, populate stru
     S.GUI.RewardWait = 2; % how much time has the mouse to consume the reward
     S.GUI.RewardAmount = 5; %ul
     
-    TypeNames = {'Blocked', 'Visual', 'Smell', 'Open', 'Random'}
+    TypeNames = {'Blocked', 'Visual', 'Smell', 'Open', 'Random'};
     S.GUI.TypeSelector = 1;
     S.GUIMeta.TypeSelector.Style = 'popupmenu';        % This dropdown-menu shows all available Types, which are contained in a list.
     S.GUIMeta.TypeSelector.String = TypeNames;       % Whatever is selected here will determine the TrialType to use for the next trial.
@@ -54,7 +56,7 @@ end
 TrialTypes = TrialTypes(randperm(length(TrialTypes)));
 BpodSystem.Data.TrialTypes = []; % The trial type of each trial completed will be added here.
 
-OldProbs = ProbList % Remembering this allows us to redraw the projected trials on the fly.
+OldProbs = ProbList; % Remembering this allows us to redraw the projected trials on the fly.
 %% Initialize plots
 BpodSystem.ProtocolFigures.OutcomePlotFig = figure('Position', [50 540 1000 250],'name','Outcome plot','numbertitle','off', 'MenuBar', 'none', 'Resize', 'off');
 BpodSystem.GUIHandles.OutcomePlot = axes('Position', [.075 .3 .89 .6]);
@@ -63,12 +65,19 @@ BpodNotebook('init'); % Initialize Bpod notebook (for manual data annotation)
 BpodParameterGUI('init', S); % Initialize parameter GUI plugin
 
 %% Prepare communication with other elements
-PC_socket = tcpip('localhost', 30000, 'NetworkRole', 'server');
+PCSocket = tcpip('localhost', 30000, 'NetworkRole', 'server', 'Timeout', inf);
+system('"D:\gin\TPM\30_code\venv\Scripts\pythonw.exe" "D:\gin\TPM\30_code\PC\PC_Recording.py" &');
+fopen(PCSocket);
+fread(PCSocket,1);
+disp('Recorders connected, confirmation byte received.')
+
 %% Main trial loop
 for CurrentTrial = 1:MaxTrials    
     S = BpodParameterGUI('sync', S); % Sync parameters with BpodParameterGUI plugin
     R = GetValveTimes(S.GUI.RewardAmount, [1]); ValveTime = R(1); % Update reward amount
 
+    SoftCodeHandler(0);
+    
     %--- Typically, a block of code here will compute variables for assembling this trial's state machine
     ProbList = [S.GUI.BlockedProb, S.GUI.VisualProb, S.GUI.SmellProb, S.GUI.OpenProb];
     if ~isequal(OldProbs, ProbList) % Check if someone changed the Probs
@@ -140,6 +149,12 @@ for CurrentTrial = 1:MaxTrials
     SendStateMatrix(sma); % Send state machine to the Bpod state machine device
     RawEvents = RunStateMatrix; % Run the trial and return events
     
+    %--- Tell the recorders to save their files
+    SoftCodeHandler(3);
+    % Wait for the confirmation byte that the saving was finished.
+    pause(2)
+    fread(PCSocket,1);
+
     %--- Package and save the trial's data, update plots
     if ~isempty(fieldnames(RawEvents)) % If trial data was returned
         BpodSystem.Data = AddTrialEvents(BpodSystem.Data,RawEvents); % Computes trial events from raw data
@@ -163,7 +178,19 @@ for CurrentTrial = 1:MaxTrials
     %--- This final block of code is necessary for the Bpod console's pause and stop buttons to work
     HandlePauseCondition; % Checks to see if the protocol is paused. If so, waits until user resumes.
     if BpodSystem.Status.BeingUsed == 0
+        %--- Here we clear all remaining elements before the protocol ends
+        CleanUp
         return
     end
 end
 %--- Here we clear all remaining elements before the protocol ends
+CleanUp
+end
+
+function CleanUp
+    global PCSocket
+    SoftCodeHandler(4);
+    disp('Python processes have shut down.');
+    % Wait for the confirmation byte that the shutting down was finished.
+    fread(PCSocket,1);
+end

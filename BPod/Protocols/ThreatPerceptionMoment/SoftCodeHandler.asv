@@ -1,0 +1,24 @@
+function SoftCodeHandler(Byte)
+global BpodSystem
+global PCSocket
+
+switch Byte
+    case 0
+        s = BpodSystem.Path.CurrentDataFile;
+        s1 = strsplit(s, '.');
+        s2 = strsplit(s1{1,1}, '\');
+        data = join(["set_location ", s1{1,1}, '\', BpodSystem.Data.nTrials,'\', s2{end}, '_trial', BpodSystem.Data.nTrials, '|'], '');
+        fwrite(PCSocket, data);
+    case 1
+        data = '1|';
+        fwrite(PCSocket, data);
+    case 2
+        data = '2|';
+        fwrite(PCSocket, data);
+    case 3
+        data = '3|';
+        fwrite(PCSocket, data);
+    case 4
+        data = '4|';
+        fwrite(PCSocket, data);
+end

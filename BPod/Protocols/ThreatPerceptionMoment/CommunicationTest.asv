@@ -1,0 +1,18 @@
+SoftCodeHandler
+PC_socket = tcpip('localhost', 30000, 'NetworkRole', 'server', 'Timeout', inf);
+system('"D:\gin\TPM\30_code\venv\Scripts\pythonw.exe" "D:\gin\TPM\30_code\PC\PC_Recording.py" &');
+fopen(PC_socket);
+disp('connected')
+disp(fread(PC_socket,1));
+data = 'set_location D:\gin\TPM\30_code\PC\trial0|';
+fwrite(PC_socket, data);
+data = '1|';
+fwrite(PC_socket, data);
+pause(10)
+data = '2|';
+fwrite(PC_socket, data);
+data = '3|';
+fwrite(PC_socket, data);
+disp(fread(PC_socket,1));
+data = '4|';
+fwrite(PC_socket, data);
