@@ -859,6 +859,8 @@ def mouse_pairing_loop(instruction_pipe, settings):
     old_position_volt = position_volt
     old_delta_position_volt = 0
 
+    disk_state = 0
+
     shift_remaining = 0.0
 
     start_time = time.perf_counter()
@@ -879,6 +881,8 @@ def mouse_pairing_loop(instruction_pipe, settings):
             arguments = message[1:]
             if command is Instructions.Stop_Experiment:
                 break
+            elif command is Instructions.Set_Disk:
+                disk_state = arguments[0]
             else:
                 raise ValueError(f'Unknown command received: {command}')
 
@@ -944,9 +948,6 @@ def mouse_pairing_loop(instruction_pipe, settings):
                     time.perf_counter() > contact_time + pairing_wait_duration:
                 tube_position = 0
                 tube_contact = False
-
-                disk_state = 0
-                # disk_state = rnd.randint(0, 4)
 
                 # Writing the disk-movement
                 pin_low_thread = Timer(pairing_tube_delay, pi.hardware_PWM, kwargs={

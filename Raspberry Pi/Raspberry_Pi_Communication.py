@@ -6,14 +6,8 @@ import select
 import time
 import os
 from subprocess import call
-
-# Echo module
 import serial
 import struct
-firmwareVersion = 1
-moduleName = "EchoModule"
-ser = serial.Serial("/dev/ttyS0", 1312500)
-
 
 # project modules
 from Raspberry_Pi_Utility import Instructions
@@ -173,62 +167,81 @@ if __name__ == '__main__':
         # not available on Windows
         pass
 
-    dir_path = os.path.dirname(os.path.realpath(__file__))
-    print(dir_path)
+    # dir_path = os.path.dirname(os.path.realpath(__file__))
+    # print(dir_path)
 
     # Create a Server Socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind(('', 6666))
+    server_socket.listen(1)
+
+    # Create a UART Serial connection for Bpod
+    firmwareVersion = 1
+    moduleName = "Raspb.Pi"
+    ser = serial.Serial("/dev/ttyS0", 1312500)
+
+    control_mode = None
 
     while True:
-        print("Raspberry Pi listening on socket 6666")
-        server_socket.listen(1)     # wait for a client to connect
-        conn, client = server_socket.accept()
-        print(conn, client)
+        print("Raspberry Pi listening on socket 6666 and on serial.")
+        while True:
+            ready_to_read, _, _ = select.select([server_socket], [], [], 1)
+            if len(ready_to_read) > 0:
+                conn, client = server_socket.accept()
+                control_mode = 'PC'
+                print(f'PC control activated: {conn}, {client}')
+                break
+            bytesAvailable = ser.in_waiting
+            if bytesAvailable > 0:
+                control_mode = 'Bpod'
+                print('Bpod control activated.')
+                break
 
         # Receive data from client and decide which function to call
         while True:
-            # PC communications
-            try:    # check if select fails
-                ready_to_read, ready_to_write, in_error = select.select([conn], [conn], [], 1)
-                if len(ready_to_read) > 0:
-                    dataFromClient = conn.recv(256)
-                    try:
-                        message = dataFromClient.decode().split(' ')
-                        if len(message) > 1:
-                            valid_operations[message[0]](*message[1:])
-                        else:
-                            valid_operations[message[0]]()
-                    except KeyError as error:
-                        conn.send("KeyError occurred. Function invalid.".encode())
-                    except TypeError as error:
-                        conn.send("TypeError occurred. Probably wrong count or type of argument.".encode())
-            except select.error as error:
-                conn.close()
-                print(f'Select Error: {error}')
-                break
-            except socket.error as error:
-                conn.close()
-                print(f'Socket Error: {error}')
-                break
+            if control_mode == 'PC':
+                # PC communications
+                try:    # check if select fails
+                    ready_to_read, ready_to_write, _ = select.select([conn], [conn], [], 1)
+                    if len(ready_to_read) > 0:
+                        dataFromClient = conn.recv(256)
+                        try:
+                            message = dataFromClient.decode().split(' ')
+                            if len(message) > 1:
+                                valid_operations[message[0]](*message[1:])
+                            else:
+                                valid_operations[message[0]]()
+                        except KeyError as error:
+                            conn.send("KeyError occurred. Function invalid.".encode())
+                        except TypeError as error:
+                            conn.send("TypeError occurred. Probably wrong count or type of argument.".encode())
+                except select.error as error:
+                    conn.close()
+                    print(f'Select Error: {error}')
+                    break
+                except socket.error as error:
+                    conn.close()
+                    print(f'Socket Error: {error}')
+                    break
 
-            # BPod communications
-            bytesAvailable = ser.in_waiting;
-            if bytesAvailable > 0:
-                inByte = ser.read()
-                unpackedByte = struct.unpack('B', inByte)
-                if unpackedByte[0] != 255:
-                    ser.write(inByte)
-                else:
-                    # This code returns a self-description to the state machine.
-                    Msg = struct.pack('B', 65)  # Acknowledgement
-                    Msg += struct.pack('I', firmwareVersion)  # Firmware version as 32-bit unsigned int
-                    Msg += struct.pack('B', 10)  # Length of module name
-                    Msg += struct.pack(str(len(moduleName)) + 's', moduleName.encode('utf-8'))  # Module name
-                    Msg += struct.pack('B', 0)  # 0 to indicate no more self description to follow
-                    ser.write(Msg)
-                ser.flush()
+            if control_mode == 'Bpod':
+                # BPod communications
+                bytesAvailable = ser.in_waiting
+                if bytesAvailable > 0:
+                    inByte = ser.read()
+                    unpackedByte = struct.unpack('B', inByte)
+                    if unpackedByte[0] != 255:
+                        ser.write(inByte)
+                    else:
+                        # This code returns a self-description to the state machine.
+                        Msg = struct.pack('B', 65)  # Acknowledgement
+                        Msg += struct.pack('I', firmwareVersion)  # Firmware version as 32-bit unsigned int
+                        Msg += struct.pack('B', len(moduleName))  # Length of module name
+                        Msg += struct.pack(str(len(moduleName)) + 's', moduleName.encode('utf-8'))  # Module name
+                        Msg += struct.pack('B', 0)  # 0 to indicate no more self description to follow
+                        ser.write(Msg)
+                    ser.flush()
 
             # internal communications
             if screen_pipe.poll():
