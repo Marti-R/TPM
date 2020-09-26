@@ -21,52 +21,16 @@ record_process = None
 screen_pipe, at_screen = multiprocessing.Pipe()
 
 
-def Func1(*args):
-    conn.send("0".encode())
-    print("Func1")
-
-
-def Func2(*args):
-    print("Func2")
-
-
-def test_func(instruction_pipe, *args):
-    active = False
-    record_dict = {}
-    trial_start_time = None
-    print('init')
-
-    instruction_pipe.send((Instructions.Ready,))
-
-    while True:
-        # Check for new instructions
-        if instruction_pipe.poll():
-            command = instruction_pipe.recv()
-            if command is Instructions.Start_Trial:
-                active = True
-                record_dict = {}
-                trial_start_time = time.perf_counter()
-            elif command is Instructions.End_Trial:
-                active = False
-                print('SENDING ' + str(len(record_dict)) + ' LINES.')
-                instruction_pipe.send((Instructions.Sending_Records,record_dict))
-            elif command is Instructions.Stop_Experiment:
-                break
-            else:
-                raise ValueError(f'Unknown command received: {command}')
-
-        if not active:
-            continue
-
-        now = time.perf_counter()
-        record_dict[now] = now - trial_start_time
-
-        print('im active')
-
-    print('im closed')
-
-
 def init_screen(*args):
+    global record_process
+    if not record_process:
+        record_process = multiprocessing.Process(target=Raspberry_Pi_Setup_Control.experiment_loop,
+                                                 args=(at_screen, settings))
+        record_process.daemon = True
+        record_process.start()
+
+
+def init_screen_bpod(*args):
     global record_process
     if not record_process:
         record_process = multiprocessing.Process(target=Raspberry_Pi_Setup_Control.experiment_loop,
@@ -145,18 +109,17 @@ def shutdown(*args):
     end(with_poweroff=True)
 
 
-valid_operations = {"test1": Func1,
-                    "test2": Func2,
-                    'end': end,
+valid_operations = {'end': end,
                     'shutdown': shutdown,
                     'get_option': get_option,
                     'set_option': set_option,
-                    '1': init_screen,
-                    '2': start_trial,
+                    'init_screen': init_screen,
+                    '1': start_trial,
                     'set_disk': set_disk,
-                    '3': end_trial,
-                    '4': shutdown_screen,
+                    '2': end_trial,
+                    'shutdown_screen': shutdown_screen,
                     'pairing': init_pairing,
+                    'init_screen_bpod': init_screen_bpod,
                     }
 
 
@@ -178,7 +141,7 @@ if __name__ == '__main__':
 
     # Create a UART Serial connection for Bpod
     firmwareVersion = 1
-    moduleName = "Raspb.Pi"
+    moduleName = "RaspbPi"
     ser = serial.Serial("/dev/ttyS0", 1312500)
 
     control_mode = None
@@ -186,7 +149,7 @@ if __name__ == '__main__':
     while True:
         print("Raspberry Pi listening on socket 6666 and on serial.")
         while True:
-            ready_to_read, _, _ = select.select([server_socket], [], [], 1)
+            ready_to_read, _, _ = select.select([server_socket], [], [], 0)
             if len(ready_to_read) > 0:
                 conn, client = server_socket.accept()
                 control_mode = 'PC'
@@ -219,10 +182,12 @@ if __name__ == '__main__':
                 except select.error as error:
                     conn.close()
                     print(f'Select Error: {error}')
+                    control_mode = None
                     break
                 except socket.error as error:
                     conn.close()
                     print(f'Socket Error: {error}')
+                    control_mode = None
                     break
 
             if control_mode == 'Bpod':
@@ -231,9 +196,35 @@ if __name__ == '__main__':
                 if bytesAvailable > 0:
                     inByte = ser.read()
                     unpackedByte = struct.unpack('B', inByte)
-                    if unpackedByte[0] != 255:
-                        ser.write(inByte)
-                    else:
+                    print(f'{inByte} = {unpackedByte[0]}')
+                    if unpackedByte[0] == 0:
+                        message_string = ''
+                        next_letter = ''
+                        while next_letter != '|':
+                            message_string += next_letter
+                            next_letter = struct.unpack('s', ser.read())[0].decode()
+                        message = message_string.split(' ')
+                        if len(message) > 1:
+                            valid_operations[message[0]](*message[1:])
+                        else:
+                            valid_operations[message[0]]()
+                    elif unpackedByte[0] == 1:
+                        start_trial()
+                    elif unpackedByte[0] == 2:
+                        end_trial()
+                    elif unpackedByte[0] == 30:
+                        set_disk(0)
+                    elif unpackedByte[0] == 31:
+                        set_disk(1)
+                    elif unpackedByte[0] == 32:
+                        set_disk(2)
+                    elif unpackedByte[0] == 33:
+                        set_disk(3)
+                    elif unpackedByte[0] == 4:
+                        init_screen_bpod()
+                    elif unpackedByte[0] == 5:
+                        shutdown_screen()
+                    elif unpackedByte[0] == 255:
                         # This code returns a self-description to the state machine.
                         Msg = struct.pack('B', 65)  # Acknowledgement
                         Msg += struct.pack('I', firmwareVersion)  # Firmware version as 32-bit unsigned int
@@ -242,6 +233,13 @@ if __name__ == '__main__':
                         Msg += struct.pack('B', 0)  # 0 to indicate no more self description to follow
                         ser.write(Msg)
                     ser.flush()
+
+                # Backup check for pc control, in case the Bpod dies
+                ready_to_read, _, _ = select.select([server_socket], [], [], 0)
+                if len(ready_to_read) > 0:
+                    conn, client = server_socket.accept()
+                    control_mode = 'PC'
+                    print(f'PC override activated: {conn}, {client}')
 
             # internal communications
             if screen_pipe.poll():

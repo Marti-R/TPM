@@ -71,13 +71,16 @@ fopen(PCSocket);
 fread(PCSocket,1);
 disp('Recorders connected, confirmation byte received.')
 
+ModuleWrite('RaspbPi1', 4);
+disp('Raspberry Pi told to start screen.')
+
 %% Main trial loop
 for CurrentTrial = 1:MaxTrials    
     S = BpodParameterGUI('sync', S); % Sync parameters with BpodParameterGUI plugin
     R = GetValveTimes(S.GUI.RewardAmount, [1]); ValveTime = R(1); % Update reward amount
 
-    SoftCodeHandler(0);
-    
+    SoftCodeHandler('SetLocation');
+
     %--- Typically, a block of code here will compute variables for assembling this trial's state machine
     ProbList = [S.GUI.BlockedProb, S.GUI.VisualProb, S.GUI.SmellProb, S.GUI.OpenProb];
     if ~isequal(OldProbs, ProbList) % Check if someone changed the Probs
@@ -106,20 +109,25 @@ for CurrentTrial = 1:MaxTrials
     end
     if CurrentTrial ~= 1
         TrialTypeOutcomePlot(BpodSystem.GUIHandles.OutcomePlot,'update',BpodSystem.Data.nTrials+1,TrialTypes,Outcomes); % Update the Plot
+    else
+        TrialTypeOutcomePlot(BpodSystem.GUIHandles.OutcomePlot,'update',CurrentTrial,TrialTypes,[0]); % Update the Plot
     end
+        
+    %--- Writing the disk state to the Raspberry Pi
+    ModuleWrite('RaspbPi1', TrialTypes(CurrentTrial) - 1 + 30);
     
     sma = NewStateMachine(); % Initialize new state machine description
     sma = AddState(sma, 'Name', 'S0', ...
         'Timer', 0,...
         'StateChangeConditions', {'Tup', 'S1'},...
-        'OutputActions', {'SoftCode', 1, 'Serial2', 1, 'AnalogIn1', 1}); 
+        'OutputActions', {'SoftCode', 1, 'RaspbPi1', 1, 'AnalogIn1', 1}); 
     sma = AddState(sma, 'Name', 'S1', ...
         'Timer', S.GUI.TrialLength,...
-        'StateChangeConditions', {'Serial2_1', 'S2', 'Tup', 'S6'},...
+        'StateChangeConditions', {'RaspbPi1_1', 'S2', 'Tup', 'S6'},...
         'OutputActions', {}); 
     sma = AddState(sma, 'Name', 'S2', ...
         'Timer', S.GUI.LickWait,...
-        'StateChangeConditions', {'Port1In', 'S3', 'Tup', 'S7', 'Serial2_2', 'S8'},...
+        'StateChangeConditions', {'Port1In', 'S3', 'Tup', 'S7', 'RaspbPi1_2', 'S8'},...
         'OutputActions', {});
     sma = AddState(sma, 'Name', 'S3', ...
         'Timer', ValveTime,...
@@ -127,24 +135,24 @@ for CurrentTrial = 1:MaxTrials
         'OutputActions', {'Valve1', true});
     sma = AddState(sma, 'Name', 'S4', ...
         'Timer', S.GUI.RewardWait,...
-        'StateChangeConditions', {'Tup', 'S5', 'Serial2_2', 'S8'},...
+        'StateChangeConditions', {'Tup', 'S5', 'RaspbPi1_2', 'S8'},...
         'OutputActions', {}); 
     sma = AddState(sma, 'Name', 'S5', ...
         'Timer', 0,...
         'StateChangeConditions', {'Tup', 'exit'},...
-        'OutputActions', {'SoftCode', 2, 'Serial2', 2, 'AnalogIn1', 2});
+        'OutputActions', {'SoftCode', 2, 'RaspbPi1', 2, 'AnalogIn1', 2});
     sma = AddState(sma, 'Name', 'S6', ...
         'Timer', 0,...
         'StateChangeConditions', {'Tup', 'exit'},...
-        'OutputActions', {'SoftCode', 2, 'Serial2', 2, 'AnalogIn1', 2});
+        'OutputActions', {'SoftCode', 2, 'RaspbPi1', 2, 'AnalogIn1', 2});
     sma = AddState(sma, 'Name', 'S7', ...
         'Timer', 0,...
         'StateChangeConditions', {'Tup', 'exit'},...
-        'OutputActions', {'SoftCode', 2, 'Serial2', 2, 'AnalogIn1', 2}); 
+        'OutputActions', {'SoftCode', 2, 'RaspbPi1', 2, 'AnalogIn1', 2}); 
     sma = AddState(sma, 'Name', 'S8', ...
         'Timer', 0,...
         'StateChangeConditions', {'Tup', 'exit'},...
-        'OutputActions', {'SoftCode', 2, 'Serial2', 2, 'AnalogIn1', 2}); 
+        'OutputActions', {'SoftCode', 2, 'RaspbPi1', 2, 'AnalogIn1', 2}); 
 
     SendStateMatrix(sma); % Send state machine to the Bpod state machine device
     RawEvents = RunStateMatrix; % Run the trial and return events
@@ -152,7 +160,6 @@ for CurrentTrial = 1:MaxTrials
     %--- Tell the recorders to save their files
     SoftCodeHandler(3);
     % Wait for the confirmation byte that the saving was finished.
-    pause(2)
     fread(PCSocket,1);
 
     %--- Package and save the trial's data, update plots
@@ -168,17 +175,20 @@ for CurrentTrial = 1:MaxTrials
         for x = 1:BpodSystem.Data.nTrials
             if ~isnan(BpodSystem.Data.RawEvents.Trial{x}.States.S5(1))
                 Outcomes(x) = 1;
-            else
+            elseif ~isnan(BpodSystem.Data.RawEvents.Trial{x}.States.S8(1))
+                Outcomes(x) = 0;
+            elseif ~isnan(BpodSystem.Data.RawEvents.Trial{x}.States.S7(1))
+                Outcomes(x) = 2;
+            else  % S6
                 Outcomes(x) = 3;
             end
         end
-    TrialTypeOutcomePlot(BpodSystem.GUIHandles.OutcomePlot,'update',BpodSystem.Data.nTrials+1,TrialTypes,Outcomes);
+    % TrialTypeOutcomePlot(BpodSystem.GUIHandles.OutcomePlot,'update',BpodSystem.Data.nTrials+1,TrialTypes,Outcomes);
     end
     
     %--- This final block of code is necessary for the Bpod console's pause and stop buttons to work
     HandlePauseCondition; % Checks to see if the protocol is paused. If so, waits until user resumes.
     if BpodSystem.Status.BeingUsed == 0
-        %--- Here we clear all remaining elements before the protocol ends
         CleanUp
         return
     end
@@ -193,4 +203,6 @@ function CleanUp
     disp('Python processes have shut down.');
     % Wait for the confirmation byte that the shutting down was finished.
     fread(PCSocket,1);
+    ModuleWrite('RaspbPi1', 5);
+    disp('Raspberry Pi told to shut down screen.');
 end

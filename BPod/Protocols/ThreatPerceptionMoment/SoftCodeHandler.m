@@ -4,7 +4,7 @@ global PCSocket
 global CurrentTrial
 
 switch Byte
-    case 0
+    case 'SetLocation'
         s = BpodSystem.Path.CurrentDataFile;
         s1 = strsplit(s, '.');
         s2 = strsplit(s1{1,1}, '\');

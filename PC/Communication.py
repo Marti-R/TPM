@@ -9,7 +9,6 @@ connection_settings = {
     'port': 6666,
 }
 
-
 # Stuff to make input non-blocking
 # (adapted from https://stackoverflow.com/questions/2408560/python-nonblocking-console-input, Marco)
 class KeyboardThread(threading.Thread):
