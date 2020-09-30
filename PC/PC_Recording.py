@@ -12,7 +12,6 @@ import numpy as np
 import socket
 import select
 import os
-import inspect
 
 
 class VideoHandlerProcess(Process):
@@ -39,6 +38,11 @@ class VideoHandlerProcess(Process):
         self.TlFactory = pylon.TlFactory.GetInstance()
         self.devices = self.TlFactory.EnumerateDevices()
         self.camera = pylon.InstantCamera(self.TlFactory.CreateDevice(self.devices[self.device_id]))
+        self.camera.Open()
+        pylon.FeaturePersistence.Load("Camera_Settings.pfs",  # Config file with the capturing properties
+                                      self.camera.GetNodeMap())
+# https://github.com/basler/pypylon/issues/76
+# https://github.com/basler/pypylon/blob/master/samples/grabusinggrabloopthread.py
         self.camera.StartGrabbing()
         self.framerate = 1000000 / self.camera.ExposureTime.Value
 

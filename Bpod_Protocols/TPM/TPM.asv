@@ -1,10 +1,11 @@
-function ThreatPerceptionMoment
+function TPM
 global BpodSystem
 global PCSocket
 global CurrentTrial
 
 %% Setup (runs once before the first trial and stops the code until user continues)
 MaxTrials = 1000; % Set to some sane value, for preallocation
+disp('test_start')
 
 %--- Define parameters and trial structure
 S = BpodSystem.ProtocolSettings; % Load settings chosen in launch manager into current workspace as a struct called S
@@ -33,6 +34,7 @@ LoadSerialMessages('AnalogIn1', {['L' 1], ['L' 0]});
 
 %% Define serial messages being sent to modules
 BpodSystem.SoftCodeHandlerFunction = 'SoftCodeHandler';
+disp('test_SoftCode')
 
 %% Define trials
 % 1: Blocked, 2: Visual, 3: Smell, 4: Open
@@ -56,6 +58,7 @@ end
 TrialTypes = TrialTypes(randperm(length(TrialTypes)));
 BpodSystem.Data.TrialTypes = []; % The trial type of each trial completed will be added here.
 
+
 OldProbs = ProbList; % Remembering this allows us to redraw the projected trials on the fly.
 %% Initialize plots
 BpodSystem.ProtocolFigures.OutcomePlotFig = figure('Position', [50 540 1000 250],'name','Outcome plot','numbertitle','off', 'MenuBar', 'none', 'Resize', 'off');
@@ -64,9 +67,27 @@ TrialTypeOutcomePlot(BpodSystem.GUIHandles.OutcomePlot,'init',TrialTypes);
 BpodNotebook('init'); % Initialize Bpod notebook (for manual data annotation)
 BpodParameterGUI('init', S); % Initialize parameter GUI plugin
 
+%% Set up Python environment
+pyExec = 'D:\Users\TPM\Anaconda3\envs\TPM\pythonw.exe';
+pyRoot = fileparts(pyExec);
+p = getenv('PATH');
+p = strsplit(p, ';');
+addToPath = {
+    pyRoot
+    fullfile(pyRoot, 'Library', 'mingw-w64', 'bin')
+    fullfile(pyRoot, 'Library', 'usr', 'bin')
+    fullfile(pyRoot, 'Library', 'bin')
+    fullfile(pyRoot, 'Scripts')
+    fullfile(pyRoot, 'bin')
+    };
+p = [addToPath(:); p(:)];
+p = unique(p, 'stable');
+p = strjoin(p, ';');
+setenv('PATH', p);
+
 %% Prepare communication with other elements
 PCSocket = tcpip('localhost', 30000, 'NetworkRole', 'server', 'Timeout', inf);
-system('"D:\gin\TPM\30_code\venv\Scripts\pythonw.exe" "D:\gin\TPM\30_code\PC\PC_Recording.py" &');
+system('"D:\Users\TPM\Anaconda3\envs\TPM\pythonw.exe" "D:\gin\TPM\30_code\PC\PC_Recording.py" &');
 fopen(PCSocket);
 fread(PCSocket,1);
 disp('Recorders connected, confirmation byte received.')
@@ -115,12 +136,15 @@ for CurrentTrial = 1:MaxTrials
         
     %--- Writing the disk state to the Raspberry Pi
     ModuleWrite('RaspbPi1', TrialTypes(CurrentTrial) - 1 + 30);
-    
+
     sma = NewStateMachine(); % Initialize new state machine description
+    sma = SetGlobalTimer(sma, 'TimerID', 1, 'Duration', 0.001, 'OnsetDelay', 0,...
+                     'Channel', 'BNC1', 'OnsetMessage', 1,'OffMessage', 0,...
+                     'Loop', 1, 'SendGlobalTimerEvents', 0, 'LoopInterval', 0.01); 
     sma = AddState(sma, 'Name', 'S0', ...
         'Timer', 0,...
         'StateChangeConditions', {'Tup', 'S1'},...
-        'OutputActions', {'SoftCode', 1, 'RaspbPi1', 1, 'AnalogIn1', 1}); 
+        'OutputActions', {'SoftCode', 1, 'RaspbPi1', 1, 'AnalogIn1', 1, 'GlobalTimerTrig', 1}); 
     sma = AddState(sma, 'Name', 'S1', ...
         'Timer', S.GUI.TrialLength,...
         'StateChangeConditions', {'RaspbPi1_1', 'S2', 'Tup', 'S6'},...
@@ -140,19 +164,19 @@ for CurrentTrial = 1:MaxTrials
     sma = AddState(sma, 'Name', 'S5', ...
         'Timer', 0,...
         'StateChangeConditions', {'Tup', 'exit'},...
-        'OutputActions', {'SoftCode', 2, 'RaspbPi1', 2, 'AnalogIn1', 2});
+        'OutputActions', {'SoftCode', 2, 'RaspbPi1', 2, 'AnalogIn1', 2, 'GlobalTimerCancel', 1});
     sma = AddState(sma, 'Name', 'S6', ...
         'Timer', 0,...
         'StateChangeConditions', {'Tup', 'exit'},...
-        'OutputActions', {'SoftCode', 2, 'RaspbPi1', 2, 'AnalogIn1', 2});
+        'OutputActions', {'SoftCode', 2, 'RaspbPi1', 2, 'AnalogIn1', 2, 'GlobalTimerCancel', 1});
     sma = AddState(sma, 'Name', 'S7', ...
         'Timer', 0,...
         'StateChangeConditions', {'Tup', 'exit'},...
-        'OutputActions', {'SoftCode', 2, 'RaspbPi1', 2, 'AnalogIn1', 2}); 
+        'OutputActions', {'SoftCode', 2, 'RaspbPi1', 2, 'AnalogIn1', 2, 'GlobalTimerCancel', 1}); 
     sma = AddState(sma, 'Name', 'S8', ...
         'Timer', 0,...
         'StateChangeConditions', {'Tup', 'exit'},...
-        'OutputActions', {'SoftCode', 2, 'RaspbPi1', 2, 'AnalogIn1', 2}); 
+        'OutputActions', {'SoftCode', 2, 'RaspbPi1', 2, 'AnalogIn1', 2,'GlobalTimerCancel', 1}); 
 
     SendStateMatrix(sma); % Send state machine to the Bpod state machine device
     RawEvents = RunStateMatrix; % Run the trial and return events
