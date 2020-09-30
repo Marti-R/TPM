@@ -49,6 +49,26 @@ def set_disk(disk_state, *args):
         screen_pipe.send((Instructions.Set_Disk, int(disk_state)))
 
 
+def set_disk0():
+    if record_process:
+        screen_pipe.send((Instructions.Set_Disk, 0))
+
+
+def set_disk1():
+    if record_process:
+        screen_pipe.send((Instructions.Set_Disk, 1))
+
+
+def set_disk2():
+    if record_process:
+        screen_pipe.send((Instructions.Set_Disk, 2))
+
+
+def set_disk3():
+    if record_process:
+        screen_pipe.send((Instructions.Set_Disk, 3))
+
+
 def end_trial(*args):
     if record_process:
         screen_pipe.send((Instructions.End_Trial,))
@@ -122,6 +142,15 @@ valid_operations = {'end': end,
                     'init_screen_bpod': init_screen_bpod,
                     }
 
+byte_operations = {1: start_trial,
+                   2: end_trial,
+                   30: set_disk0,
+                   31: set_disk1,
+                   32: set_disk2,
+                   33: set_disk3,
+                   4: init_screen_bpod,
+                   5: shutdown_screen
+                   }
 
 if __name__ == '__main__':
     try:
@@ -208,22 +237,6 @@ if __name__ == '__main__':
                             valid_operations[message[0]](*message[1:])
                         else:
                             valid_operations[message[0]]()
-                    elif unpackedByte[0] == 1:
-                        start_trial()
-                    elif unpackedByte[0] == 2:
-                        end_trial()
-                    elif unpackedByte[0] == 30:
-                        set_disk(0)
-                    elif unpackedByte[0] == 31:
-                        set_disk(1)
-                    elif unpackedByte[0] == 32:
-                        set_disk(2)
-                    elif unpackedByte[0] == 33:
-                        set_disk(3)
-                    elif unpackedByte[0] == 4:
-                        init_screen_bpod()
-                    elif unpackedByte[0] == 5:
-                        shutdown_screen()
                     elif unpackedByte[0] == 255:
                         # This code returns a self-description to the state machine.
                         Msg = struct.pack('B', 65)  # Acknowledgement
@@ -232,6 +245,11 @@ if __name__ == '__main__':
                         Msg += struct.pack(str(len(moduleName)) + 's', moduleName.encode('utf-8'))  # Module name
                         Msg += struct.pack('B', 0)  # 0 to indicate no more self description to follow
                         ser.write(Msg)
+                    else:
+                        try:
+                            byte_operations[unpackedByte[0]]
+                        except KeyError as error:
+                            print("KeyError occurred. Function invalid.")
                     ser.flush()
 
                 # Backup check for pc control, in case the Bpod dies
