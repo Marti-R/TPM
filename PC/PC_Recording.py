@@ -14,7 +14,104 @@ import select
 import os
 
 
-class VideoHandlerProcess(Process):
+class RecorderImageEventHandler(pylon.ImageEventHandler):
+    def __init__(self, process_id, recording_flag, current_output, meta):
+        super().__init__()
+        self.buffer = []
+        self.process_id = process_id
+        self.recording_flag = recording_flag
+        self.current_output = current_output
+        self.meta = meta
+
+    def OnImagesSkipped(self, camera, countOfSkippedImages):
+        print("OnImagesSkipped event for device ", camera.GetDeviceInfo().GetModelName())
+        print(countOfSkippedImages, " images have been skipped.")
+        print()
+
+    def OnImageGrabbed(self, camera, grabResult):
+        if grabResult.GrabSucceeded():
+            grabArray = grabResult.GetArray()
+            self.current_output[self.process_id] = np.array(grabArray)[::10, ::10]
+            if self.recording_flag.is_set:
+                self.buffer.append(grabArray)
+                self.meta[grabResult.ImageNumber] = {
+                    'NumberOfSkippedImages': grabResult.NumberOfSkippedImages,
+                    'TimeStamp': grabResult.TimeStamp,
+                }
+        else:
+            print("Error: ", grabResult.GetErrorCode(), grabResult.GetErrorDescription())
+
+
+class BaslerVideoHandlerProcessTriggered(Process):
+    def __init__(self, process_id, alive_flag, recording_flag, check_list, saving_location, meta_dict, current_output,
+                 device_id):
+        super().__init__()
+        self.process_id = process_id
+        self.alive_flag = alive_flag
+        self.recording_flag = recording_flag
+        self.check_list = check_list
+        self.saving_location = saving_location
+        self.device_id = device_id
+
+        self.TlFactory = None
+        self.devices = None
+        self.camera = None
+
+        self.current_output = current_output
+        self.meta = meta_dict
+
+        self.ImageEventHandler = None
+
+    def run(self):
+        self.TlFactory = pylon.TlFactory.GetInstance()
+        self.devices = self.TlFactory.EnumerateDevices()
+        self.camera = pylon.InstantCamera(self.TlFactory.CreateDevice(self.devices[self.device_id]))
+        self.ImageEventHandler = RecorderImageEventHandler(self.process_id, self.recording_flag, self.current_output,
+                                                           self.meta)
+        self.camera.Open()
+        pylon.FeaturePersistence.Load("Camera_Settings.pfs",  # Config file with the capturing properties
+                                      self.camera.GetNodeMap())
+        # https://github.com/basler/pypylon/issues/76
+        # https://github.com/basler/pypylon/blob/master/samples/grabusinggrabloopthread.py
+
+        self.camera.TriggerSelector.SetValue("FrameStart")
+        self.camera.TriggerMode.SetValue("On")
+        self.camera.TriggerSource.SetValue('Line3')
+
+        # The image event printer serves as sample image processing.
+        # When using the grab loop thread provided by the Instant Camera object, an image event handler processing the grab
+        # results must be created and registered.
+        self.camera.RegisterImageEventHandler(self.ImageEventHandler,
+                                              pylon.RegistrationMode_Append, pylon.Cleanup_Delete)
+
+        # Start the grabbing using the grab loop thread, by setting the grabLoopType parameter
+        # to GrabLoop_ProvidedByInstantCamera. The grab results are delivered to the image event handlers.
+        # The GrabStrategy_OneByOne default grab strategy is used.
+        self.camera.StartGrabbing(pylon.GrabStrategy_OneByOne, pylon.GrabLoop_ProvidedByInstantCamera)
+        self.framerate = 1000000 / self.camera.ExposureTime.Value
+        print('camera ' + str(self.device_id) + ' model name')
+        print(self.devices[self.device_id].GetModelName(), "-", self.devices[self.device_id].GetSerialNumber())
+
+        self.check_list[self.process_id] = 0
+        self.alive_flag.wait()
+
+        while self.alive_flag.is_set():
+            time.sleep(0.05)
+            if self.check_list[self.process_id]:
+                self.meta['save'] = time.time()
+                with get_writer(rf'{self.saving_location.value}_cam{self.device_id}.avi', fps=self.framerate) as writer:
+                    for image in self.ImageEventHandler.buffer:
+                        writer.append_data(image)
+                print(len(self.ImageEventHandler.buffer))
+                self.ImageEventHandler.buffer = []
+                self.check_list[self.process_id] = 0
+                self.ImageEventHandler.counter = 0
+
+        self.camera.StopGrabbing()
+        self.camera.Close()
+
+
+class BaslerVideoHandlerProcess(Process):
     def __init__(self, process_id, alive_flag, recording_flag, check_list, saving_location, meta_dict, current_output,
                  device_id):
         super().__init__()
@@ -39,10 +136,6 @@ class VideoHandlerProcess(Process):
         self.devices = self.TlFactory.EnumerateDevices()
         self.camera = pylon.InstantCamera(self.TlFactory.CreateDevice(self.devices[self.device_id]))
         self.camera.Open()
-        pylon.FeaturePersistence.Load("Camera_Settings.pfs",  # Config file with the capturing properties
-                                      self.camera.GetNodeMap())
-# https://github.com/basler/pypylon/issues/76
-# https://github.com/basler/pypylon/blob/master/samples/grabusinggrabloopthread.py
         self.camera.StartGrabbing()
         self.framerate = 1000000 / self.camera.ExposureTime.Value
 
@@ -267,8 +360,8 @@ if __name__ == '__main__':
     for device_id, device in enumerate(cameras):
         trial_meta[f'cam{device_id}'] = manager.dict()
 
-        p = VideoHandlerProcess(process_id, all_alive, all_recording, check_list, saving_location,
-                                trial_meta[f'cam{device_id}'], current_output, device_id)
+        p = BaslerVideoHandlerProcessTriggered(process_id, all_alive, all_recording, check_list, saving_location,
+                                               trial_meta[f'cam{device_id}'], current_output, device_id)
         p.daemon = True
         p.start()
         processes.append(p)
