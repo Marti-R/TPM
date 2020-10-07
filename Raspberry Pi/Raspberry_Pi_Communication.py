@@ -33,7 +33,7 @@ def init_screen(*args):
 def init_screen_bpod(*args):
     global record_process
     if not record_process:
-        record_process = multiprocessing.Process(target=Raspberry_Pi_Setup_Control.experiment_loop,
+        record_process = multiprocessing.Process(target=Raspberry_Pi_Setup_Control.mouse_pairing_loop_new,
                                                  args=(at_screen, settings))
         record_process.daemon = True
         record_process.start()
@@ -168,6 +168,18 @@ if __name__ == '__main__':
     server_socket.bind(('', 6666))
     server_socket.listen(1)
 
+    # Create a data-transfer Socket
+    data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    data_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    data_socket.bind(('', 40000))
+    data_socket.listen(1)
+
+    # Create a Matlab-communication Socket
+    matlab_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    matlab_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    matlab_socket.bind(('', 50000))
+    matlab_socket.listen(1)
+
     # Create a UART Serial connection for Bpod
     firmwareVersion = 1
     moduleName = "RaspbPi"
@@ -247,7 +259,8 @@ if __name__ == '__main__':
                         ser.write(Msg)
                     else:
                         try:
-                            byte_operations[unpackedByte[0]]
+                            print(byte_operations[unpackedByte[0]])
+                            byte_operations[unpackedByte[0]]()
                         except KeyError as error:
                             print("KeyError occurred. Function invalid.")
                     ser.flush()
@@ -262,13 +275,38 @@ if __name__ == '__main__':
             # internal communications
             if screen_pipe.poll():
                 message = screen_pipe.recv()
+                print(message)
                 command = message[0]
                 arguments = message[1:]
                 if command is Instructions.Ready:
                     print('screen is ready')
                 elif command is Instructions.Sending_Records:
-                    print('RECEIVED ' + str(len(arguments[0])) + ' LINES.')
+                    received_dict = arguments[0]
+                    received_json = json.dumps(received_dict)
+                    print('RECEIVED ' + str(len(received_dict)) + ' LINES.')
+                    if control_mode == 'PC':
+                        conn.send(received_json.encode())
+                    if control_mode == 'Bpod':
+                        matlab, _ = data_socket.accept()   # Bpod is too dumb for this
+                        matlab.send(received_json.encode('utf-8'))
                 elif command is Instructions.Trial_Aborted:
                     print('trial aborted')
+                    if control_mode == 'PC':
+                        conn.send('2'.encode())
+                    if control_mode == 'Bpod':
+                        ser.write(struct.pack('B', 2))
+                elif command is Instructions.Tube_Reached:
+                    print('tube reached')
+                    if control_mode == 'PC':
+                        conn.send('1'.encode())
+                    if control_mode == 'Bpod':
+                        ser.write(struct.pack('B', 1))
+                elif command is Instructions.Tube_Reset:
+                    print('tube reset')
+                    if control_mode == 'PC':
+                        conn.send('0'.encode())
+                    if control_mode == 'Bpod':
+                        matlab_conn, _ = matlab_socket.accept()   # Bpod is too dumb for this
+                        matlab_conn.send(b'0')
                 else:
                     raise ValueError(f'Unknown message received: {message}')

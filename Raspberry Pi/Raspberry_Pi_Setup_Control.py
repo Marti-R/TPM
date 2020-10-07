@@ -810,7 +810,6 @@ def mouse_pairing_loop_new(instruction_pipe, settings):
 
     frame_pin = settings['pairing_pin']
     pairing_tube_delay = settings['pairing_tube_delay']
-    pairing_wait_duration = settings['pairing_wait_duration']
 
     tube_speed = settings['tube_speed']
 
@@ -887,11 +886,12 @@ def mouse_pairing_loop_new(instruction_pipe, settings):
     old_delta_position_volt = 0
 
     disk_state = 0
+    pi.hardware_PWM(disk_out, 500, int(disk_state * 0.25 * 500000) + 100000)
 
     shift_remaining = 0.0
 
-    start_time = time.perf_counter()
-    contact_time = time.perf_counter()
+    trial_start_time = time.perf_counter()
+    trial_end_time = 0
 
     active = False
     tube_contact = False
@@ -911,14 +911,22 @@ def mouse_pairing_loop_new(instruction_pipe, settings):
             if command is Instructions.Start_Trial:
                 active = True
                 record_dict = {}
+                frame_id = 0
                 trial_start_time = time.perf_counter()
                 sound.play()
             elif command is Instructions.End_Trial:
-                active = False
-                tube_position = 0
-                print('SENDING ' + str(len(record_dict)) + ' LINES.')
-                instruction_pipe.send((Instructions.Sending_Records, record_dict))
-                trial_end_time = time.perf_counter()
+                if active:
+                    active = False
+                    tube_position = 0
+                    print('SENDING ' + str(len(record_dict)) + ' LINES.')
+                    instruction_pipe.send((Instructions.Sending_Records, record_dict))
+                    trial_end_time = time.perf_counter()
+                    # Writing the disk reset with delay
+                    message = (Instructions.Tube_Reset, )
+                    messenger_thread = Timer(pairing_tube_delay * 5, instruction_pipe.send,
+                                             args=[message, ])
+                    messenger_thread.daemon = True
+                    messenger_thread.start()
             elif command is Instructions.Set_Disk:
                 disk_state = arguments[0]
                 # Writing the disk-movement
@@ -953,6 +961,15 @@ def mouse_pairing_loop_new(instruction_pipe, settings):
             scaled_surface.fill(background_color)
 
         position_volt = position_channel.voltage
+        if active:
+            timestamp_volt = time.perf_counter() - trial_start_time
+            pi.write(frame_pin, 1)
+            pin_low_thread = Timer(0.005, pi.write, kwargs={
+                'gpio': frame_pin,
+                'level': 0
+            })
+            pin_low_thread.daemon = True
+            pin_low_thread.start()
 
         delta_position_volt = position_volt - old_position_volt
         old_position_volt = position_volt
@@ -964,24 +981,24 @@ def mouse_pairing_loop_new(instruction_pipe, settings):
         delta_position_real = delta_position_volt / 5.033 * wheel_circumference
 
         if not tube_contact:
-            if time.perf_counter() > start_time + pairing_tube_delay * 5:
-                this_loop = time.perf_counter()
+            this_loop = time.perf_counter()
 
-                if active:
-                    tube_position += speed_multiplier * math.copysign(1, delta_position_real) * min(
-                        abs(delta_position_real) / (this_loop - previous_loop), tube_speed) * (
-                                                 this_loop - previous_loop)
-                previous_loop = this_loop
+            if active:
+                tube_position += speed_multiplier * math.copysign(1, delta_position_real) * min(
+                    abs(delta_position_real) / (this_loop - previous_loop), tube_speed) * (
+                                             this_loop - previous_loop)
+            previous_loop = this_loop
 
-                if tube_position < 0:
-                    tube_position = 0
+            if tube_position < 0:
+                tube_position = 0
 
-                elif tube_position > 0.95 * tube_distance:
-                    tube_position = tube_distance
-                    tube_contact = True
-                    contact_time = time.perf_counter() + pairing_tube_delay
+            elif tube_position > 0.95 * tube_distance:
+                tube_position = tube_distance
+                tube_contact = True
 
-                pi.hardware_PWM(tube_out, 500, int(tube_position / tube_distance * 500000) + 100000)
+                instruction_pipe.send((Instructions.Tube_Reached, ))
+
+            pi.hardware_PWM(tube_out, 500, int(tube_position / tube_distance * 500000) + 100000)
 
         else:
             this_loop = time.perf_counter()
@@ -989,15 +1006,11 @@ def mouse_pairing_loop_new(instruction_pipe, settings):
                 abs(delta_position_real) / (this_loop - previous_loop), tube_speed) * (this_loop - previous_loop)
             previous_loop = this_loop
 
-            if tube_position < reward_abort * tube_distance or \
-                    time.perf_counter() > contact_time + pairing_wait_duration:
+            if tube_position < reward_abort * tube_distance:
+                instruction_pipe.send((Instructions.Trial_Aborted,))
                 tube_position = 0
                 tube_contact = False
-
                 pi.hardware_PWM(tube_out, 500, int(tube_position / tube_distance * 500000) + 100000)
-
-                start_time = time.perf_counter()
-
                 continue
 
             elif tube_position > tube_distance:
@@ -1018,9 +1031,17 @@ def mouse_pairing_loop_new(instruction_pipe, settings):
         update_rectangle_list = scale_rectangles(update_rectangle_list, 1. / scale)
         pygame.display.update(update_rectangle_list)
 
+        if active:
+            timestamp_update = time.perf_counter() - trial_start_time
+            record_dict[frame_id] = {
+                'timestamp_volt': timestamp_volt,
+                'position_volt': position_volt,
+                'timestamp_update': timestamp_update,
+                'position_cm': absolute_position
+            }
+            frame_id += 1
+
         clock.tick(target_fps)
 
     pygame.display.quit()
     pygame.quit()
-    print('im closed')
-
