@@ -238,7 +238,7 @@ if __name__ == '__main__':
                     inByte = ser.read()
                     unpackedByte = struct.unpack('B', inByte)
                     print(f'{inByte} = {unpackedByte[0]}')
-                    if unpackedByte[0] == 0:
+                    if unpackedByte[0] == 254:
                         message_string = ''
                         next_letter = ''
                         while next_letter != '|':
@@ -286,26 +286,26 @@ if __name__ == '__main__':
                     print('RECEIVED ' + str(len(received_dict)) + ' LINES.')
                     if control_mode == 'PC':
                         conn.send(received_json.encode())
-                    if control_mode == 'Bpod':
+                    elif control_mode == 'Bpod':
                         matlab, _ = data_socket.accept()   # Bpod is too dumb for this
                         matlab.send(received_json.encode('utf-8'))
                 elif command is Instructions.Trial_Aborted:
                     print('trial aborted')
                     if control_mode == 'PC':
                         conn.send('2'.encode())
-                    if control_mode == 'Bpod':
+                    elif control_mode == 'Bpod':
                         ser.write(struct.pack('B', 2))
                 elif command is Instructions.Tube_Reached:
                     print('tube reached')
                     if control_mode == 'PC':
                         conn.send('1'.encode())
-                    if control_mode == 'Bpod':
+                    elif control_mode == 'Bpod':
                         ser.write(struct.pack('B', 1))
                 elif command is Instructions.Tube_Reset:
                     print('tube reset')
                     if control_mode == 'PC':
                         conn.send('0'.encode())
-                    if control_mode == 'Bpod':
+                    elif control_mode == 'Bpod':
                         matlab_conn, _ = matlab_socket.accept()   # Bpod is too dumb for this
                         matlab_conn.send(b'0')
                 else:

@@ -14,9 +14,24 @@ import select
 import os
 
 
+class VideoSaveHandler(Process):
+    def __init__(self, saving_location, fps, record):
+        super(VideoSaveHandler, self).__init__()
+        self.writer = None
+        self.saving_location = saving_location
+        self.fps = fps
+        self.record = record
+
+    def run(self):
+        self.writer = get_writer(self.saving_location, fps=self.fps)
+        for image in self.record:
+            self.writer.append_data(image)
+        self.writer.close()
+
+
 class RecorderImageEventHandler(pylon.ImageEventHandler):
     def __init__(self, process_id, recording_flag, current_output, meta):
-        super().__init__()
+        super(RecorderImageEventHandler, self).__init__()
         self.buffer = []
         self.process_id = process_id
         self.recording_flag = recording_flag
@@ -45,7 +60,7 @@ class RecorderImageEventHandler(pylon.ImageEventHandler):
 class BaslerVideoHandlerProcessTriggered(Process):
     def __init__(self, process_id, alive_flag, recording_flag, check_list, saving_location, meta_dict, current_output,
                  device_id):
-        super().__init__()
+        super(BaslerVideoHandlerProcessTriggered, self).__init__()
         self.process_id = process_id
         self.alive_flag = alive_flag
         self.recording_flag = recording_flag
@@ -61,6 +76,7 @@ class BaslerVideoHandlerProcessTriggered(Process):
         self.meta = meta_dict
 
         self.ImageEventHandler = None
+        self.saving_process = None
 
     def run(self):
         self.TlFactory = pylon.TlFactory.GetInstance()
@@ -99,22 +115,28 @@ class BaslerVideoHandlerProcessTriggered(Process):
             time.sleep(0.05)
             if self.check_list[self.process_id]:
                 self.meta['save'] = time.time()
-                with get_writer(rf'{self.saving_location.value}_cam{self.device_id}.avi', fps=self.framerate) as writer:
-                    for image in self.ImageEventHandler.buffer:
-                        writer.append_data(image)
-                print(len(self.ImageEventHandler.buffer))
+                if self.saving_process and self.saving_process.is_alive():
+                    self.saving_process.join()
+                self.saving_process = VideoSaveHandler(rf'{self.saving_location.value}_cam{self.device_id}.avi',
+                                                       self.framerate, self.ImageEventHandler.buffer)
+                self.saving_process.start()
+                print(f'In recording: {len(self.ImageEventHandler.buffer)}')
                 self.ImageEventHandler.buffer = []
                 self.check_list[self.process_id] = 0
+                print(self.check_list)
                 self.ImageEventHandler.counter = 0
 
         self.camera.StopGrabbing()
         self.camera.Close()
 
+        if self.saving_process and self.saving_process.is_alive():
+            self.saving_process.join()
+
 
 class BaslerVideoHandlerProcess(Process):
     def __init__(self, process_id, alive_flag, recording_flag, check_list, saving_location, meta_dict, current_output,
                  device_id):
-        super().__init__()
+        super(BaslerVideoHandlerProcess, self).__init__()
         self.process_id = process_id
         self.alive_flag = alive_flag
         self.recording_flag = recording_flag
@@ -173,10 +195,28 @@ class BaslerVideoHandlerProcess(Process):
         self.camera.Close()
 
 
+class AudioSaveHandler(Process):
+    def __init__(self, saving_location, nchannels, sample_width, frame_rate, record):
+        super(AudioSaveHandler, self).__init__()
+        self.wavefile = None
+        self.saving_location = saving_location
+        self.nchannels = nchannels
+        self.sample_width = sample_width
+        self.frame_rate = frame_rate
+        self.record = record
+
+    def run(self):
+        self.wavefile = wave.open(self.saving_location, 'wb')
+        print(f'In saving: {len(self.record)}')
+        self.wavefile.setnchannels(self.nchannels)
+        self.wavefile.setsampwidth(self.sample_width)
+        self.wavefile.setframerate(self.frame_rate)
+
+
 class AudioHandlerProcess(Process):
     def __init__(self, process_id, alive_flag, recording_flag, check_list, saving_location, meta_dict, current_output,
                  device_id):
-        super().__init__()
+        super(AudioHandlerProcess, self).__init__()
         self.process_id = process_id
         self.alive_flag = alive_flag
         self.recording_flag = recording_flag
@@ -190,6 +230,7 @@ class AudioHandlerProcess(Process):
         self.buffer = []
         self.current_output = current_output
         self.meta = meta_dict
+        self.saving_process = None
 
     def run(self):
         self.pa = pyaudio.PyAudio()
@@ -215,18 +256,26 @@ class AudioHandlerProcess(Process):
             if self.check_list[self.process_id]:
                 self.meta['save'] = time.time()
                 self.meta['delta'] = time.perf_counter() - time_reference
-                with wave.open(rf'{self.saving_location.value}_mic{self.device_id}.wav', 'wb') as wavefile:
-                    wavefile.setnchannels(1)
-                    wavefile.setsampwidth(self.pa.get_sample_size(pyaudio.paInt32))
-                    wavefile.setframerate(384000)
-                    wavefile.writeframes(b''.join(self.buffer))
+                if self.saving_process and self.saving_process.is_alive():
+                    self.saving_process.join()
+                self.saving_process = AudioSaveHandler(
+                    saving_location=rf'{self.saving_location.value}_mic{self.device_id}.wav',
+                    nchannels=1,
+                    sample_width=self.pa.get_sample_size(pyaudio.paInt32),
+                    frame_rate=384000,
+                    record=self.buffer)
+                self.saving_process.start()
                 # print(len(self.buffer))
                 self.buffer = []
                 self.check_list[self.process_id] = 0
+                print(self.check_list)
 
         self.stream.stop_stream()
         self.stream.close()
         self.pa.terminate()
+
+        if self.saving_process and self.saving_process.is_alive():
+            self.saving_process.join()
 
 
 class Application:
@@ -314,7 +363,7 @@ class Application:
 
 class GUIHandler(Process):
     def __init__(self, alive_flag, current_output, process_names):
-        super().__init__()
+        super(GUIHandler, self).__init__()
         self.current_output = current_output
         self.process_names = process_names
         self.alive_flag = alive_flag
@@ -362,7 +411,6 @@ if __name__ == '__main__':
 
         p = BaslerVideoHandlerProcessTriggered(process_id, all_alive, all_recording, check_list, saving_location,
                                                trial_meta[f'cam{device_id}'], current_output, device_id)
-        p.daemon = True
         p.start()
         processes.append(p)
         process_names.append(f'cam{device_id}')
@@ -373,7 +421,6 @@ if __name__ == '__main__':
 
         p = AudioHandlerProcess(process_id, all_alive, all_recording, check_list, saving_location,
                                 trial_meta[f'cam{device_id}'], current_output, device_id)
-        p.daemon = True
         p.start()
         processes.append(p)
         process_names.append(f'mic{device_id}')
@@ -384,17 +431,14 @@ if __name__ == '__main__':
     p.start()
     processes.append(p)
 
-
     def saving():
         check_list[:] = [1] * len(check_list)
-
 
     def set_location(location):
         folder, file_prefix = location.rsplit('\\', 1)
         if not os.path.exists(folder):
             os.makedirs(folder)
         saving_location.value = location
-
 
     command_dict = {
         '1': all_recording.set,

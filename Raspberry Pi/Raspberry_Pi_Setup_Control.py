@@ -633,6 +633,9 @@ def mouse_pairing_loop(instruction_pipe, settings):
     # Prepare the frame output trigger pin
     pi.set_mode(pairing_pin, pigpio.OUTPUT)
 
+    # Prepare sound for synchronization
+    sound = pygame.mixer.Sound('./sounds/pure_200Hz.wav')
+
     position_volt = position_channel.voltage
 
     absolute_position = 0
