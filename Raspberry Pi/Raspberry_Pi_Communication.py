@@ -41,7 +41,12 @@ def init_screen_bpod(*args):
 
 def start_trial(*args):
     if record_process:
-        screen_pipe.send((Instructions.Start_Trial,))
+        screen_pipe.send((Instructions.Start_Trial, True))
+
+
+def start_trial_no_recording(*args):
+    if record_process:
+        screen_pipe.send((Instructions.Start_Trial, False))
 
 
 def set_disk(disk_state, *args):
@@ -143,6 +148,7 @@ valid_operations = {'end': end,
                     }
 
 byte_operations = {1: start_trial,
+                   10: start_trial_no_recording,
                    2: end_trial,
                    30: set_disk0,
                    31: set_disk1,

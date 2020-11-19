@@ -879,7 +879,7 @@ def mouse_pairing_loop_new(instruction_pipe, settings):
     pi.set_mode(frame_pin, pigpio.OUTPUT)
 
     # Prepare sound for synchronization
-    sound = pygame.mixer.Sound('./sounds/pure_200Hz.wav')
+    sound = pygame.mixer.Sound('./sounds/pure_50Hz.wav')
 
     position_volt = position_channel.voltage
 
@@ -897,6 +897,7 @@ def mouse_pairing_loop_new(instruction_pipe, settings):
     trial_end_time = 0
 
     active = False
+    recording = False
     tube_contact = False
     print('init')
 
@@ -913,6 +914,7 @@ def mouse_pairing_loop_new(instruction_pipe, settings):
             arguments = message[1:]
             if command is Instructions.Start_Trial:
                 active = True
+                recording = arguments[0]
                 record_dict = {}
                 frame_id = 0
                 trial_start_time = time.perf_counter()
@@ -921,8 +923,9 @@ def mouse_pairing_loop_new(instruction_pipe, settings):
                 if active:
                     active = False
                     tube_position = 0
-                    print('SENDING ' + str(len(record_dict)) + ' LINES.')
-                    instruction_pipe.send((Instructions.Sending_Records, record_dict))
+                    if recording:
+                        print('SENDING ' + str(len(record_dict)) + ' LINES.')
+                        instruction_pipe.send((Instructions.Sending_Records, record_dict))
                     trial_end_time = time.perf_counter()
                     # Writing the disk reset with delay
                     message = (Instructions.Tube_Reset, )
@@ -1034,7 +1037,7 @@ def mouse_pairing_loop_new(instruction_pipe, settings):
         update_rectangle_list = scale_rectangles(update_rectangle_list, 1. / scale)
         pygame.display.update(update_rectangle_list)
 
-        if active:
+        if active and recording:
             timestamp_update = time.perf_counter() - trial_start_time
             record_dict[frame_id] = {
                 'timestamp_volt': timestamp_volt,
