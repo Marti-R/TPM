@@ -420,7 +420,7 @@ if __name__ == '__main__':
         trial_meta[f'mic{device_id}'] = manager.dict()
 
         p = AudioHandlerProcess(process_id, all_alive, all_recording, check_list, saving_location,
-                                trial_meta[f'cam{device_id}'], current_output, device_id)
+                                trial_meta[f'mic{device_id}'], current_output, device_id)
         p.start()
         processes.append(p)
         process_names.append(f'mic{device_id}')

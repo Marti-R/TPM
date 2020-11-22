@@ -122,8 +122,6 @@ def end(with_poweroff=False, *args):
     if record_process:
         screen_pipe.send((Instructions.Stop_Experiment,))
         record_process.join()
-    conn.send("shutdown".encode())
-    server_socket.close()
     if with_poweroff:
         call("sudo shutdown --poweroff now", shell=True)
     else:
@@ -221,6 +219,9 @@ if __name__ == '__main__':
                             if len(message) > 1:
                                 valid_operations[message[0]](*message[1:])
                             else:
+                                if message[0] in ['end', 'shutdown']:
+                                    conn.send("shutdown".encode())
+                                    server_socket.close()
                                 valid_operations[message[0]]()
                         except KeyError as error:
                             conn.send("KeyError occurred. Function invalid.".encode())
