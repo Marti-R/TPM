@@ -24,6 +24,7 @@ class VideoSaveHandler(Process):
 
     def run(self):
         self.writer = get_writer(self.saving_location, fps=self.fps)
+        print(f'In saving: {len(self.record)}')
         for image in self.record:
             self.writer.append_data(image)
         self.writer.close()
@@ -207,7 +208,6 @@ class AudioSaveHandler(Process):
 
     def run(self):
         self.wavefile = wave.open(self.saving_location, 'wb')
-        print(f'In saving: {len(self.record)}')
         self.wavefile.setnchannels(self.nchannels)
         self.wavefile.setsampwidth(self.sample_width)
         self.wavefile.setframerate(self.frame_rate)
