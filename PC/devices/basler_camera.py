@@ -1,5 +1,5 @@
 from pypylon import pylon
-from multiprocessing import Process
+from multiprocessing import Process, Array
 import numpy as np
 import time
 from imageio import get_writer
@@ -23,6 +23,7 @@ class BaslerImageHandler(pylon.ImageEventHandler):
     def __init__(self, parent):
         super(BaslerImageHandler, self).__init__()
         self.parent = parent
+        self.output_port = parent.get_output_port()
 
         self.buffer = []
         self.meta = {}
@@ -35,7 +36,7 @@ class BaslerImageHandler(pylon.ImageEventHandler):
     def OnImageGrabbed(self, camera, grabResult):
         if grabResult.GrabSucceeded():
             grabArray = grabResult.GetArray()
-            self.parent.set_current_frame(np.array(grabArray)[::10, ::10])
+            self.output_port[:] = np.array(grabArray)
             if self.recording:
                 self.buffer.append(grabArray)
                 self.meta[len(self.buffer)] = {
@@ -63,16 +64,17 @@ class BaslerCameraProcess(Process):
         # cannot be initiated during init, must be created after process starts
         self.camera = None
         self.image_event_handler = None
+        self.output_port = None
 
         self.name = assigned_name
 
-        self.current_frame = None
         self.saving_process = None
 
         self.alive = True
 
     def run(self):
         self.camera_setup()
+        self.build_output_port(self.get_image_width(), self.get_image_height())
 
         while self.alive:
             time.sleep(0.05)
@@ -93,10 +95,28 @@ class BaslerCameraProcess(Process):
         self.image_event_handler = BaslerImageHandler(self)
 
         self.camera.Open()
-        pylon.FeaturePersistence.Load("Camera_Settings.pfs", self.camera.GetNodeMap())
+        pylon.FeaturePersistence.Load("configs/Camera_Settings.pfs", self.camera.GetNodeMap())
         self.camera.RegisterCameraEventHandler(self.image_event_handler, pylon.RegistrationMode_ReplaceAll,
                                                pylon.Cleanup_Delete)
         self.camera.StartGrabbing(pylon.GrabStrategy_OneByOne, pylon.GrabLoop_ProvidedByInstantCamera)
+
+    def build_output_port(self, width, height):
+        initial_array =[[0] * height] * width
+        self.output_port = Array('i', initial_array)
+
+    def get_image_width(self):
+        x_offset = self.camera.OffsetX
+        self.camera.OffsetX = 0
+        image_width = self.camera.Width.Max
+        self.camera.OffsetX = x_offset
+        return image_width
+
+    def get_image_height(self):
+        y_offset = self.camera.OffsetY
+        self.camera.OffsetY = 0
+        image_height = self.camera.Height.Max
+        self.camera.OffsetY = y_offset
+        return image_height
 
     def set_camera_mode(self, mode):
         if mode == 'hw_trigger':
@@ -121,3 +141,6 @@ class BaslerCameraProcess(Process):
 
         self.saving_process = VideoSaveProcess(saving_location, fps, self.image_event_handler.return_buffer())
         self.saving_process.start()
+
+    def get_output_port(self):
+        return self.output_port
