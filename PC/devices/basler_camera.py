@@ -7,14 +7,14 @@ from imageio import get_writer
 
 
 class VideoSaveProcess(Process):
-    '''
+    """
     A small process that takes care of saving a video, so that the other processes can keep running.
 
     args:
     saving_location: A string describing the path to the saving location
     fps: FPS of the video to save
     record: an iterable containing a series of images (as array) that make up the video
-    '''
+    """
 
     def __init__(self, saving_location, fps, record):
         # set up all the relevant variables
@@ -31,7 +31,7 @@ class VideoSaveProcess(Process):
 
 
 class BaslerImageHandler(pylon.ImageEventHandler):
-    '''
+    """
     Subclass of pylon.ImageEventHandler which is used to process the grabbed frames from the camera assigned to its
     parent and store them optionally in a buffer if the recording bool was set.
     During recording it can also write to a meta-dictionary that includes information to this recording.
@@ -39,7 +39,8 @@ class BaslerImageHandler(pylon.ImageEventHandler):
 
     args:
     parent: The instance of BaslerCameraProcess that this object is assigned to.
-    '''
+    """
+
     def __init__(self, parent):
         super(BaslerImageHandler, self).__init__()
 
@@ -90,16 +91,17 @@ class BaslerImageHandler(pylon.ImageEventHandler):
 
 
 class BaslerCameraProcess(Process):
-    '''
+    """
     Main multithreading.Process subclass which controls a camera which is assigned via the information given to it in a
     dict. Communication with this process happens via a pipe.
-    '''
+    """
+
     def __init__(self, initial_dict,  communication_pipe):
         super(BaslerCameraProcess, self).__init__()
 
         # extend the given dict with the shared array used to access this cameras live-feed and the info on how to build
         # an image_port from that.
-        self.camera_dict = self.build_camera_dict(initial_dict)
+        self.camera_dict = self.build_shared_array(initial_dict)
         self.pipe = communication_pipe
 
         # cannot be initiated during init, must be created after process starts
@@ -114,7 +116,7 @@ class BaslerCameraProcess(Process):
         self.alive = True
         self.ready = Event()
 
-    def build_camera_dict(self, initial_dict):
+    def build_shared_array(self, initial_dict):
         # to build the shared_array we need to know the size of the sensor. Since this property is not accessible while
         # the camera is inactive, we need to activate it for a moment and check the size, then deactivate it.
         camera = self.get_camera_by_index(initial_dict['assigned_camera_index'])
